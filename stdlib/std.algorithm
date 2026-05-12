@@ -1,0 +1,453 @@
+// ============================================================================
+//  std.algorithm  --  Algorithms for sorting, searching, and transforming Lists
+//  Import with:  import "std.algorithm";
+//
+//  All functions that accept comparators or transformers use closures (var).
+//  Comparator signature:  (var a, var b) => int   returns <0, 0, or >0
+//  Predicate signature:   (var item) => bool
+//  Transformer signature: (var item) => var
+//  Reducer signature:     (var acc, var item) => var
+//
+//  Example:
+//    import "std.algorithm";
+//    import "std.collections";
+//
+//    List nums = new List();
+//    nums.add(3); nums.add(1); nums.add(4); nums.add(1); nums.add(5);
+//
+//    sort(nums, (var a, var b) => (a as int) - (b as int));
+//    List evens = filter(nums, (var x) => (x as int) % 2 == 0);
+//    List doubled = map(nums, (var x) => (x as int) * 2);
+//    var total = reduce(nums, 0, (var acc, var x) => (acc as int) + (x as int));
+// ============================================================================
+
+import "std.collections";
+
+// ── Sorting ───────────────────────────────────────────────────────────────────
+
+// Sort a List in-place using a comparator closure.
+// cmp(a, b) must return <0 if a < b, 0 if equal, >0 if a > b.
+// Stable insertion sort — safe for small-to-medium lists.
+fun void sort(List lst, var cmp) {
+    int n = lst.length();
+    int i = 1;
+    while (i < n) {
+        var key = lst.get(i);
+        int j = i - 1;
+        while (j >= 0) {
+            int r = cmp(lst.get(j), key) as int;
+            if (r <= 0) { break; }
+            lst.set(j + 1, lst.get(j));
+            j = j - 1;
+        }
+        lst.set(j + 1, key);
+        i = i + 1;
+    }
+}
+
+// Sort a List of strings lexicographically (ascending).
+fun void sortStrings(List lst) {
+    sort(lst, (var a, var b) => {
+        string sa = a as string;
+        string sb = b as string;
+        return compare(sa, sb);
+    });
+}
+
+// Sort a List of ints numerically (ascending).
+fun void sortInts(List lst) {
+    sort(lst, (var a, var b) => (a as int) - (b as int));
+}
+
+// Sort a List of longs numerically (ascending).
+fun void sortLongs(List lst) {
+    sort(lst, (var a, var b) => {
+        long la = a as long;
+        long lb = b as long;
+        if (la < lb) { return -1; }
+        if (la > lb) { return 1; }
+        return 0;
+    });
+}
+
+// Sort a List of doubles numerically (ascending).
+fun void sortDoubles(List lst) {
+    sort(lst, (var a, var b) => {
+        double da = a as double;
+        double db = b as double;
+        if (da < db) { return -1; }
+        if (da > db) { return 1; }
+        return 0;
+    });
+}
+
+// Reverse a List in-place.
+fun void reverse(List lst) {
+    int lo = 0;
+    int hi = lst.length() - 1;
+    while (lo < hi) {
+        var tmp = lst.get(lo);
+        lst.set(lo, lst.get(hi));
+        lst.set(hi, tmp);
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+}
+
+// Return a new List that is the reverse of lst.
+fun List reversed(List lst) {
+    List r = new List();
+    int i = lst.length() - 1;
+    while (i >= 0) { r.add(lst.get(i)); i = i - 1; }
+    return r;
+}
+
+// Shuffle a List in-place (Fisher-Yates, uses randomInt).
+fun void shuffle(List lst) {
+    int n = lst.length();
+    int i = n - 1;
+    while (i > 0) {
+        int j = randomInt(0, i + 1);
+        var tmp = lst.get(i);
+        lst.set(i, lst.get(j));
+        lst.set(j, tmp);
+        i = i - 1;
+    }
+}
+
+// ── Searching ─────────────────────────────────────────────────────────────────
+
+// Linear search — returns index of first element where pred returns true, or -1.
+fun int findIndex(List lst, var pred) {
+    int i = 0;
+    while (i < lst.length()) {
+        if (pred(lst.get(i)) as bool) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Returns the first element matching pred, or null if none.
+fun var findFirst(List lst, var pred) {
+    int i = findIndex(lst, pred);
+    if (i >= 0) { return lst.get(i); }
+    return null;
+}
+
+// Returns the last element matching pred, or null if none.
+fun var findLast(List lst, var pred) {
+    int i = lst.length() - 1;
+    while (i >= 0) {
+        if (pred(lst.get(i)) as bool) { return lst.get(i); }
+        i = i - 1;
+    }
+    return null;
+}
+
+// Binary search on a sorted List.
+// cmp(a, b) same convention as sort. Returns index of a match, or -1.
+fun int binarySearch(List lst, var target, var cmp) {
+    int lo = 0;
+    int hi = lst.length() - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        int r = cmp(lst.get(mid), target) as int;
+        if (r == 0) { return mid; }
+        if (r < 0)  { lo = mid + 1; }
+        else        { hi = mid - 1; }
+    }
+    return -1;
+}
+
+// Returns true if any element satisfies pred.
+fun bool any(List lst, var pred) {
+    return findIndex(lst, pred) >= 0;
+}
+
+// Returns true if all elements satisfy pred.
+fun bool all(List lst, var pred) {
+    int i = 0;
+    while (i < lst.length()) {
+        if (!(pred(lst.get(i)) as bool)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// Returns true if no element satisfies pred.
+fun bool none(List lst, var pred) {
+    return !any(lst, pred);
+}
+
+// Count elements matching pred.
+fun int countIf(List lst, var pred) {
+    int c = 0;
+    int i = 0;
+    while (i < lst.length()) {
+        if (pred(lst.get(i)) as bool) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+// ── Transformation ────────────────────────────────────────────────────────────
+
+// Return a new List containing only elements for which pred returns true.
+fun List filter(List lst, var pred) {
+    List r = new List();
+    int i = 0;
+    while (i < lst.length()) {
+        var item = lst.get(i);
+        if (pred(item) as bool) { r.add(item); }
+        i = i + 1;
+    }
+    return r;
+}
+
+// Return a new List where each element is transform(original).
+fun List map(List lst, var transform) {
+    List r = new List();
+    int i = 0;
+    while (i < lst.length()) {
+        r.add(transform(lst.get(i)));
+        i = i + 1;
+    }
+    return r;
+}
+
+// Fold lst left: acc = reducer(acc, item) for each item.
+fun var reduce(List lst, var initial, var reducer) {
+    var acc = initial;
+    int i = 0;
+    while (i < lst.length()) {
+        acc = reducer(acc, lst.get(i));
+        i = i + 1;
+    }
+    return acc;
+}
+
+// Fold lst right: acc = reducer(item, acc) for each item from the right.
+fun var reduceRight(List lst, var initial, var reducer) {
+    var acc = initial;
+    int i = lst.length() - 1;
+    while (i >= 0) {
+        acc = reducer(lst.get(i), acc);
+        i = i - 1;
+    }
+    return acc;
+}
+
+// Apply action(item) to every element (returns void).
+fun void forEach(List lst, var action) {
+    int i = 0;
+    while (i < lst.length()) { action(lst.get(i)); i = i + 1; }
+}
+
+// Flatten a List of Lists into a single List.
+fun List flatten(List lst) {
+    List r = new List();
+    int i = 0;
+    while (i < lst.length()) {
+        List inner = lst.get(i) as List;
+        int j = 0;
+        while (j < inner.length()) { r.add(inner.get(j)); j = j + 1; }
+        i = i + 1;
+    }
+    return r;
+}
+
+// Return a new List with duplicate elements removed (keeps first occurrence).
+fun List distinct(List lst) {
+    List r = new List();
+    Set seen = new Set();
+    int i = 0;
+    while (i < lst.length()) {
+        string key = lst.get(i) as string;
+        if (!seen.has(key)) {
+            seen.add(key);
+            r.add(lst.get(i));
+        }
+        i = i + 1;
+    }
+    return r;
+}
+
+// Zip two Lists together into a List of two-element Lists.
+// Stops at the shorter list.
+fun List zip(List a, List b) {
+    List r = new List();
+    int n = a.length();
+    if (b.length() < n) { n = b.length(); }
+    int i = 0;
+    while (i < n) {
+        List pair = new List();
+        pair.add(a.get(i));
+        pair.add(b.get(i));
+        r.add(pair);
+        i = i + 1;
+    }
+    return r;
+}
+
+// Partition lst into two Lists: [matching, non-matching].
+// Returns a List of two Lists.
+fun List partition(List lst, var pred) {
+    List yes = new List();
+    List no  = new List();
+    int i = 0;
+    while (i < lst.length()) {
+        var item = lst.get(i);
+        if (pred(item) as bool) { yes.add(item); } else { no.add(item); }
+        i = i + 1;
+    }
+    List r = new List();
+    r.add(yes);
+    r.add(no);
+    return r;
+}
+
+// ── Aggregation ───────────────────────────────────────────────────────────────
+
+// Sum of integer elements.
+fun int sumInt(List lst) {
+    int total = 0;
+    int i = 0;
+    while (i < lst.length()) { total = total + (lst.get(i) as int); i = i + 1; }
+    return total;
+}
+
+// Sum of double elements.
+fun double sumDouble(List lst) {
+    double total = 0.0;
+    int i = 0;
+    while (i < lst.length()) { total = total + (lst.get(i) as double); i = i + 1; }
+    return total;
+}
+
+// Minimum int element. Returns 0 if list is empty.
+fun int minInt(List lst) {
+    if (lst.isEmpty()) { return 0; }
+    int m = lst.get(0) as int;
+    int i = 1;
+    while (i < lst.length()) { int v = lst.get(i) as int; if (v < m) m = v; i = i + 1; }
+    return m;
+}
+
+// Maximum int element. Returns 0 if list is empty.
+fun int maxInt(List lst) {
+    if (lst.isEmpty()) { return 0; }
+    int m = lst.get(0) as int;
+    int i = 1;
+    while (i < lst.length()) { int v = lst.get(i) as int; if (v > m) m = v; i = i + 1; }
+    return m;
+}
+
+// Minimum double element.
+fun double minDouble(List lst) {
+    if (lst.isEmpty()) { return 0.0; }
+    double m = lst.get(0) as double;
+    int i = 1;
+    while (i < lst.length()) { double v = lst.get(i) as double; if (v < m) m = v; i = i + 1; }
+    return m;
+}
+
+// Maximum double element.
+fun double maxDouble(List lst) {
+    if (lst.isEmpty()) { return 0.0; }
+    double m = lst.get(0) as double;
+    int i = 1;
+    while (i < lst.length()) { double v = lst.get(i) as double; if (v > m) m = v; i = i + 1; }
+    return m;
+}
+
+// Average of double elements. Returns 0.0 if empty.
+fun double average(List lst) {
+    if (lst.isEmpty()) { return 0.0; }
+    return sumDouble(lst) / (lst.length() as double);
+}
+
+// Join a List of strings with a separator.
+fun string joinStrings(List lst, string sep) {
+    StringBuilder sb = new StringBuilder();
+    int i = 0;
+    while (i < lst.length()) {
+        if (i > 0) { sb.append(sep); }
+        sb.append(lst.get(i) as string);
+        i = i + 1;
+    }
+    return sb.toString();
+}
+
+// Group elements by key: returns a Map of string → List.
+fun Map groupBy(List lst, var keyFn) {
+    Map m = new Map();
+    int i = 0;
+    while (i < lst.length()) {
+        var item = lst.get(i);
+        string key = keyFn(item) as string;
+        if (!m.has(key)) { m.set(key, new List()); }
+        List group = m.get(key) as List;
+        group.add(item);
+        i = i + 1;
+    }
+    return m;
+}
+
+// ── Range generation ──────────────────────────────────────────────────────────
+
+// Create a List of ints from start (inclusive) to end (exclusive), step 1.
+fun List range(int start, int end) {
+    List r = new List();
+    int i = start;
+    while (i < end) { r.add(i); i = i + 1; }
+    return r;
+}
+
+// Create a List of ints from start to end with given step.
+fun List rangeStep(int start, int end, int step) {
+    List r = new List();
+    if (step > 0) {
+        int i = start;
+        while (i < end) { r.add(i); i = i + step; }
+    } else if (step < 0) {
+        int i = start;
+        while (i > end) { r.add(i); i = i + step; }
+    }
+    return r;
+}
+
+// Repeat a value N times in a new List.
+fun List listOf(var value, int n) {
+    List r = new List();
+    int i = 0;
+    while (i < n) { r.add(value); i = i + 1; }
+    return r;
+}
+
+// ── Random ────────────────────────────────────────────────────────────────────
+
+// Seed the random number generator.
+fun void seed(int s) { randomSeed(s); }
+
+// Random integer in [lo, hi).
+fun int randInt(int lo, int hi) { return randomInt(lo, hi); }
+
+// Random double in [0.0, 1.0).
+fun double randDouble() { return randomDouble(); }
+
+// Pick a random element from a List.
+fun var choice(List lst) {
+    if (lst.isEmpty()) { return null; }
+    return lst.get(randomInt(0, lst.length()));
+}
+
+// Sample k elements at random (without replacement) from lst.
+fun List sample(List lst, int k) {
+    List copy = lst.concat(new List());
+    shuffle(copy);
+    if (k >= copy.length()) { return copy; }
+    List r = new List();
+    int i = 0;
+    while (i < k) { r.add(copy.get(i)); i = i + 1; }
+    return r;
+}

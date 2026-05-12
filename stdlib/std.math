@@ -1,0 +1,220 @@
+// ============================================================================
+//  std.math  –  Mathematics library
+//  Import with:  import "std.math";
+// ============================================================================
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+double PI    = 3.141592653589793;
+double E     = 2.718281828459045;
+double TAU   = 6.283185307179586;   // 2 * PI
+double INF   = _nativeInfinity();
+double NAN   = _nativeNaN();
+
+// ── Rounding ──────────────────────────────────────────────────────────────────
+
+fun double floor(double x) {
+    return _nativeFloor(x);
+}
+
+fun double ceil(double x) {
+    return _nativeCeil(x);
+}
+
+fun double round(double x) {
+    return _nativeRound(x);
+}
+
+fun double trunc(double x) {
+    return _nativeTrunc(x);
+}
+
+// ── Absolute value ────────────────────────────────────────────────────────────
+
+fun double abs(double x) {
+    if (x < 0.0) {
+        return x * -1.0;
+    }
+    return x;
+}
+
+fun int absInt(int x) {
+    if (x < 0) {
+        return x * -1;
+    }
+    return x;
+}
+
+// ── Power / roots ─────────────────────────────────────────────────────────────
+
+fun double sqrt(double x) {
+    if (x < 0.0) {
+        return NAN;
+    }
+    return _nativeSqrt(x);
+}
+
+fun double pow(double base, double exp) {
+    return _nativePow(base, exp);
+}
+
+fun double cbrt(double x) {
+    return _nativeCbrt(x);
+}
+
+// Integer power (base^exp, exp >= 0).
+fun int powInt(int base, int exp) {
+    int result = 1;
+    int i = 0;
+    while (i < exp) {
+        result = result * base;
+        i = i + 1;
+    }
+    return result;
+}
+
+// ── Logarithms ────────────────────────────────────────────────────────────────
+
+fun double log(double x) {
+    return _nativeLog(x);
+}
+
+fun double log2(double x) {
+    return _nativeLog2(x);
+}
+
+fun double log10(double x) {
+    return _nativeLog10(x);
+}
+
+// ── Trigonometry ──────────────────────────────────────────────────────────────
+
+fun double sin(double x) {
+    return _nativeSin(x);
+}
+
+fun double cos(double x) {
+    return _nativeCos(x);
+}
+
+fun double tan(double x) {
+    return _nativeTan(x);
+}
+
+fun double asin(double x) {
+    return _nativeAsin(x);
+}
+
+fun double acos(double x) {
+    return _nativeAcos(x);
+}
+
+fun double atan(double x) {
+    return _nativeAtan(x);
+}
+
+fun double atan2(double y, double x) {
+    return _nativeAtan2(y, x);
+}
+
+// Convert degrees to radians.
+fun double toRadians(double degrees) {
+    return degrees * (PI / 180.0);
+}
+
+// Convert radians to degrees.
+fun double toDegrees(double radians) {
+    return radians * (180.0 / PI);
+}
+
+// ── Min / Max / Clamp ─────────────────────────────────────────────────────────
+
+fun double min(double a, double b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+fun double max(double a, double b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+fun int minInt(int a, int b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+fun int maxInt(int a, int b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+// Clamp x to the range [lo, hi].
+fun double clamp(double x, double lo, double hi) {
+    return min(max(x, lo), hi);
+}
+
+fun int clampInt(int x, int lo, int hi) {
+    return minInt(maxInt(x, lo), hi);
+}
+
+// ── Integer utilities ─────────────────────────────────────────────────────────
+
+// Greatest common divisor (Euclidean algorithm).
+fun int gcd(int a, int b) {
+    a = absInt(a);
+    b = absInt(b);
+    while (b != 0) {
+        int tmp = b;
+        b = a - (a / b) * b;   // a mod b
+        a = tmp;
+    }
+    return a;
+}
+
+// Least common multiple.
+fun int lcm(int a, int b) throws {
+    if (a == 0 || b == 0) {
+        throw "lcm: zero argument";
+    }
+    return absInt(a / gcd(a, b) * b);
+}
+
+// Return true if n is even.
+fun bool isEven(int n) {
+    return (n & 1) == 0;
+}
+
+// Return true if n is odd.
+fun bool isOdd(int n) {
+    return (n & 1) != 0;
+}
+
+// Return true if n is a prime number (trial division, n >= 2).
+fun bool isPrime(int n) {
+    if (n < 2) {
+        return false;
+    }
+    if (n == 2) {
+        return true;
+    }
+    if (isEven(n)) {
+        return false;
+    }
+    int i = 3;
+    while (i * i <= n) {
+        if ((n - (n / i) * i) == 0) {   // n mod i == 0
+            return false;
+        }
+        i = i + 2;
+    }
+    return true;
+}

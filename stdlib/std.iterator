@@ -1,0 +1,425 @@
+// ============================================================================
+//  std.iterator  --  Lazy iterator chains over collections
+//  Import with:  import "std.iterator";
+//
+//  Iterators wrap a List and a chain of transformations.
+//  All operations are lazy: nothing is evaluated until collect() or forEach()
+//  is called.  Chaining creates a new Iterator at each step (the source List
+//  is not materialised until the terminal).
+//
+//  Usage:
+//    import "std.iterator";
+//    import "std.collections";
+//
+//    List nums = new List();
+//    nums.add(1); nums.add(2); nums.add(3); nums.add(4); nums.add(5);
+//
+//    // Functional chain
+//    List result = iter(nums)
+//        .filter((var x) => (x as int) % 2 == 0)
+//        .map((var x) => (x as int) * 10)
+//        .collect();
+//    // result = [20, 40]
+//
+//    // Range iterator
+//    List squares = iterRange(1, 6)
+//        .map((var x) => (x as int) * (x as int))
+//        .collect();
+//    // squares = [1, 4, 9, 16, 25]
+// ============================================================================
+
+import "std.collections";
+
+import "std.string";
+
+// ── Iterator class ────────────────────────────────────────────────────────────
+
+class Iterator {
+    private List  source;    // materialised source items
+    private List  ops;       // list of {type:string, fn:var} operation records
+    private int   limitN;    // -1 = no limit
+    private int   skipN;     // items to skip at the start
+    private bool  reversed;  // iterate in reverse
+
+    public fun void init() {
+        this.source   = new List();
+        this.ops      = new List();
+        this.limitN   = -1;
+        this.skipN    = 0;
+        this.reversed = false;
+    }
+
+    // Internal: set the source list.
+    public fun Iterator withSource(List s) {
+        this.source = s;
+        return this;
+    }
+
+    // ── Intermediate operations (lazy) ────────────────────────────────────────
+
+    // Keep only elements where pred(item) returns true.
+    public fun Iterator filter(var pred) {
+        Iterator next = new Iterator(); next.init();
+        next.source   = this.collect();    // materialise current chain
+        next.limitN   = -1;
+        List op = new List(); op.add("filter"); op.add(pred);
+        next.ops.add(op);
+        return next;
+    }
+
+    // Transform each element: new item = transform(item).
+    public fun Iterator map(var transform) {
+        Iterator next = new Iterator(); next.init();
+        next.source = this.collect();
+        List op = new List(); op.add("map"); op.add(transform);
+        next.ops.add(op);
+        return next;
+    }
+
+    // Keep only the first n elements.
+    public fun Iterator limit(int n) {
+        Iterator next = new Iterator(); next.init();
+        next.source = this.collect();
+        next.limitN = n;
+        return next;
+    }
+
+    // Skip the first n elements.
+    public fun Iterator skip(int n) {
+        Iterator next = new Iterator(); next.init();
+        next.source = this.collect();
+        next.skipN  = n;
+        return next;
+    }
+
+    // Reverse the iteration order.
+    public fun Iterator reverse() {
+        Iterator next = new Iterator(); next.init();
+        next.source   = this.collect();
+        next.reversed = true;
+        return next;
+    }
+
+    // Sort ascending by comparator.
+    public fun Iterator sortBy(var cmp) {
+        List mat = this.collect();
+        // insertion sort on mat
+        int n = mat.length();
+        int i = 1;
+        while (i < n) {
+            var key = mat.get(i);
+            int j = i - 1;
+            while (j >= 0) {
+                int r = cmp(mat.get(j), key) as int;
+                if (r <= 0) { break; }
+                mat.set(j + 1, mat.get(j));
+                j = j - 1;
+            }
+            mat.set(j + 1, key);
+            i = i + 1;
+        }
+        Iterator next = new Iterator(); next.init();
+        next.source = mat;
+        return next;
+    }
+
+    // Keep only distinct elements (uses string representation as key).
+    public fun Iterator distinct(var keyFn) {
+        List mat = this.collect();
+        List r   = new List();
+        Set  seen = new Set();
+        int i = 0;
+        while (i < mat.length()) {
+            string key = keyFn(mat.get(i)) as string;
+            if (!seen.has(key)) { seen.add(key); r.add(mat.get(i)); }
+            i = i + 1;
+        }
+        Iterator next = new Iterator(); next.init();
+        next.source = r;
+        return next;
+    }
+
+    // Concatenate another iterator's items after this one.
+    public fun Iterator concat(Iterator other) {
+        List a = this.collect();
+        List b = other.collect();
+        int i = 0;
+        while (i < b.length()) { a.add(b.get(i)); i = i + 1; }
+        Iterator next = new Iterator(); next.init();
+        next.source = a;
+        return next;
+    }
+
+    // Flatten: each element must itself be a List.
+    public fun Iterator flatten() {
+        List mat = this.collect();
+        List r   = new List();
+        int i = 0;
+        while (i < mat.length()) {
+            List inner = mat.get(i) as List;
+            int j = 0;
+            while (j < inner.length()) { r.add(inner.get(j)); j = j + 1; }
+            i = i + 1;
+        }
+        Iterator next = new Iterator(); next.init();
+        next.source = r;
+        return next;
+    }
+
+    // FlatMap: apply transform (returns List) to each element, flatten result.
+    public fun Iterator flatMap(var transform) {
+        return this.map(transform).flatten();
+    }
+
+    // Peek: apply action to each element without changing it.
+    public fun Iterator peek(var action) {
+        Iterator next = new Iterator(); next.init();
+        List mat = this.collect();
+        int i = 0;
+        while (i < mat.length()) { action(mat.get(i)); i = i + 1; }
+        next.source = mat;
+        return next;
+    }
+
+    // ── Terminal operations ────────────────────────────────────────────────────
+
+    // Materialise all pending operations into a new List.
+    public fun List collect() {
+        List src = this.source;
+
+        // Apply stored op chain
+        int oi = 0;
+        while (oi < this.ops.length()) {
+            List op   = this.ops.get(oi) as List;
+            string t  = op.get(0) as string;
+            var    fn = op.get(1);
+            List tmp = new List();
+            int i = 0;
+            while (i < src.length()) {
+                var item = src.get(i);
+                if (t == "filter") {
+                    if (fn(item) as bool) { tmp.add(item); }
+                } else if (t == "map") {
+                    tmp.add(fn(item));
+                } else {
+                    tmp.add(item);
+                }
+                i = i + 1;
+            }
+            src = tmp;
+            oi = oi + 1;
+        }
+
+        // Apply skip
+        if (this.skipN > 0) {
+            List tmp = new List();
+            int i = this.skipN;
+            while (i < src.length()) { tmp.add(src.get(i)); i = i + 1; }
+            src = tmp;
+        }
+
+        // Apply limit
+        if (this.limitN >= 0) {
+            List tmp = new List();
+            int i = 0;
+            while (i < src.length() && i < this.limitN) {
+                tmp.add(src.get(i)); i = i + 1;
+            }
+            src = tmp;
+        }
+
+        // Apply reverse
+        if (this.reversed) {
+            List tmp = new List();
+            int i = src.length() - 1;
+            while (i >= 0) { tmp.add(src.get(i)); i = i - 1; }
+            src = tmp;
+        }
+
+        return src;
+    }
+
+    // Apply action to each materialised element.
+    public fun void forEach(var action) {
+        List r = this.collect();
+        int i = 0;
+        while (i < r.length()) { action(r.get(i)); i = i + 1; }
+    }
+
+    // Fold: acc = reducer(acc, item) across all elements.
+    public fun var reduce(var initial, var reducer) {
+        List r   = this.collect();
+        var  acc = initial;
+        int i = 0;
+        while (i < r.length()) { acc = reducer(acc, r.get(i)); i = i + 1; }
+        return acc;
+    }
+
+    // Count materialised elements.
+    public fun int count() { return this.collect().length(); }
+
+    // True if any element satisfies pred.
+    public fun bool any(var pred) {
+        List r = this.collect();
+        int i = 0;
+        while (i < r.length()) { if (pred(r.get(i)) as bool) return true; i = i + 1; }
+        return false;
+    }
+
+    // True if all elements satisfy pred.
+    public fun bool all(var pred) {
+        List r = this.collect();
+        int i = 0;
+        while (i < r.length()) { if (!(pred(r.get(i)) as bool)) return false; i = i + 1; }
+        return true;
+    }
+
+    // First element (or null if empty).
+    public fun var first() {
+        List r = this.collect();
+        if (r.isEmpty()) { return null; }
+        return r.get(0);
+    }
+
+    // Last element (or null if empty).
+    public fun var last() {
+        List r = this.collect();
+        if (r.isEmpty()) { return null; }
+        return r.get(r.length() - 1);
+    }
+
+    // Find first element where pred returns true (or null).
+    public fun var find(var pred) {
+        List r = this.collect();
+        int i = 0;
+        while (i < r.length()) {
+            var item = r.get(i);
+            if (pred(item) as bool) { return item; }
+            i = i + 1;
+        }
+        return null;
+    }
+
+    // Sum of int elements.
+    public fun int sumInt() {
+        List r = this.collect();
+        int total = 0;
+        int i = 0;
+        while (i < r.length()) { total = total + (r.get(i) as int); i = i + 1; }
+        return total;
+    }
+
+    // Sum of double elements.
+    public fun double sumDouble() {
+        List r = this.collect();
+        double total = 0.0;
+        int i = 0;
+        while (i < r.length()) { total = total + (r.get(i) as double); i = i + 1; }
+        return total;
+    }
+
+    // Join string elements with separator.
+    public fun string joinStrings(string sep) {
+        List r = this.collect();
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < r.length()) {
+            if (i > 0) { sb.append(sep); }
+            sb.append(r.get(i) as string);
+            i = i + 1;
+        }
+        return sb.toString();
+    }
+
+    // Group by key function → Map of string → List.
+    public fun Map groupBy(var keyFn) {
+        List r = this.collect();
+        Map m  = new Map();
+        int i  = 0;
+        while (i < r.length()) {
+            var    item = r.get(i);
+            string key  = keyFn(item) as string;
+            if (!m.has(key)) { m.set(key, new List()); }
+            List group = m.get(key) as List;
+            group.add(item);
+            i = i + 1;
+        }
+        return m;
+    }
+
+    // Partition into two Lists: [matching, non-matching].
+    public fun List partition(var pred) {
+        List r = this.collect();
+        List yes = new List(); List no = new List();
+        int i = 0;
+        while (i < r.length()) {
+            var item = r.get(i);
+            if (pred(item) as bool) { yes.add(item); } else { no.add(item); }
+            i = i + 1;
+        }
+        List result = new List(); result.add(yes); result.add(no);
+        return result;
+    }
+
+    // Zip this iterator's elements with another list.
+    public fun Iterator zip(List other) {
+        List a = this.collect();
+        int n = a.length();
+        if (other.length() < n) { n = other.length(); }
+        List r = new List();
+        int i = 0;
+        while (i < n) {
+            List pair = new List(); pair.add(a.get(i)); pair.add(other.get(i));
+            r.add(pair); i = i + 1;
+        }
+        Iterator next = new Iterator(); next.init(); next.source = r;
+        return next;
+    }
+}
+
+// ── Constructors ──────────────────────────────────────────────────────────────
+
+// Create an Iterator over an existing List.
+fun Iterator iter(List lst) {
+    Iterator it = new Iterator();
+    it.init();
+    it.withSource(lst);
+    return it;
+}
+
+// Create an Iterator over a range of ints [start, end).
+fun Iterator iterRange(int start, int end) {
+    List r = new List();
+    int i = start;
+    while (i < end) { r.add(i); i = i + 1; }
+    return iter(r);
+}
+
+// Create an Iterator over a range with step.
+fun Iterator iterRangeStep(int start, int end, int step) {
+    List r = new List();
+    if (step > 0) {
+        int i = start;
+        while (i < end) { r.add(i); i = i + step; }
+    } else if (step < 0) {
+        int i = start;
+        while (i > end) { r.add(i); i = i + step; }
+    }
+    return iter(r);
+}
+
+// Create an Iterator that repeats a value N times.
+fun Iterator iterRepeat(var value, int n) {
+    List r = new List();
+    int i = 0;
+    while (i < n) { r.add(value); i = i + 1; }
+    return iter(r);
+}
+
+// Create an Iterator over a string's characters.
+fun Iterator iterChars(string s) {
+    List r = new List();
+    int i = 0;
+    while (i < stringLen(s)) { r.add(s[i]); i = i + 1; }
+    return iter(r);
+}

@@ -1,0 +1,307 @@
+// ============================================================================
+//  std.collections  --  List, Map, Set, StringBuilder
+//  Import with:  import "std.collections";
+//
+//  All collections are GC-managed.  They use i8* (var) internally for type
+//  erasure -- cast elements to/from your actual types at call sites.
+//
+//  Example:
+//    List tokens = new List();
+//    tokens.add(new Token(...));
+//    Token t = tokens.get(0) as Token;
+// ============================================================================
+
+// ── List ─────────────────────────────────────────────────────────────────────
+//
+//  A growable array of object references (i8*).
+//  Backed by a GC-allocated fat block that doubles when full.
+//
+class List {
+    private var data;       // i8* -- internal fat block
+
+    public fun void init() {
+        this.data = _native_listNew();
+    }
+
+    // Number of elements
+    public fun int length() {
+        return _native_listLen(this.data);
+    }
+
+    public fun int size() {
+        return _native_listLen(this.data);
+    }
+
+    public fun bool isEmpty() {
+        return _native_listLen(this.data) == 0;
+    }
+
+    // Append item to end
+    public fun void add(var item) {
+        this.data = _native_listAdd(this.data, item);
+    }
+
+    // Get item at index
+    public fun var get(int index) {
+        return _native_listGet(this.data, index);
+    }
+
+    // Set item at index
+    public fun void set(int index, var item) {
+        this.data = _native_listSet(this.data, index, item);
+    }
+
+    // Remove item at index, returns the list
+    public fun void remove(int index) {
+        this.data = _native_listRemove(this.data, index);
+    }
+
+    // Insert item at index, shifting others right
+    public fun void insert(int index, var item) {
+        this.data = _native_listInsert(this.data, index, item);
+    }
+
+    // First index of item (by pointer equality), or -1
+    public fun int indexOf(var item) {
+        return _native_listIndexOf(this.data, item);
+    }
+
+    public fun bool contains(var item) {
+        return _native_listContains(this.data, item);
+    }
+
+    // Return a new List with elements [start..end)
+    public fun List slice(int start, int end) {
+        List result = new List();
+        result.data = _native_listSlice(this.data, start, end);
+        return result;
+    }
+
+    // Concatenate with another list, return new List
+    public fun List concat(List other) {
+        List result = new List();
+        result.data = _native_listConcat(this.data, other.data);
+        return result;
+    }
+
+    // Get first/last element
+    public fun var first() {
+        return _native_listGet(this.data, 0);
+    }
+
+    public fun var last() {
+        int n = _native_listLen(this.data);
+        return _native_listGet(this.data, n - 1);
+    }
+
+    // Remove and return last element (stack pop)
+    public fun var pop() {
+        int n = _native_listLen(this.data);
+        var item = _native_listGet(this.data, n - 1);
+        this.data = _native_listRemove(this.data, n - 1);
+        return item;
+    }
+
+    // Add to front (stack push front)
+    public fun void prepend(var item) {
+        this.data = _native_listInsert(this.data, 0, item);
+    }
+}
+
+// ── Map ──────────────────────────────────────────────────────────────────────
+//
+//  An open-addressing hash map from string keys to object values (i8*).
+//  Keys are GC-managed copies.  Values are i8* -- cast to your actual type.
+//
+class Map {
+    private var data;       // i8* -- internal hash table
+
+    public fun void init() {
+        this.data = _native_mapNew();
+    }
+
+    // Insert or update key → value
+    public fun void set(string key, var value) {
+        this.data = _native_mapSet(this.data, key, value);
+    }
+
+    // Get value for key, or null if not present
+    public fun var get(string key) {
+        return _native_mapGet(this.data, key);
+    }
+
+    // Return true if key exists
+    public fun bool has(string key) {
+        return _native_mapHas(this.data, key);
+    }
+
+    // Remove key from map
+    public fun void remove(string key) {
+        this.data = _native_mapDelete(this.data, key);
+    }
+
+    // Number of entries
+    public fun int count() {
+        return _native_mapCount(this.data);
+    }
+
+    public fun int size() {
+        return _native_mapCount(this.data);
+    }
+
+    public fun bool isEmpty() {
+        return _native_mapCount(this.data) == 0;
+    }
+
+    // Return a List of all keys
+    public fun List keys() {
+        List result = new List();
+        result.data = _native_mapKeys(this.data);
+        return result;
+    }
+
+    // Return a List of all values
+    public fun List values() {
+        List result = new List();
+        result.data = _native_mapValues(this.data);
+        return result;
+    }
+
+    // Get or default
+    public fun var getOrDefault(string key, var defaultVal) {
+        if (this.has(key)) return this.get(key);
+        return defaultVal;
+    }
+}
+
+// ── Set ──────────────────────────────────────────────────────────────────────
+//
+//  A set of string values backed by a Map with dummy values.
+//
+class Set {
+    private var data;
+
+    public fun void init() {
+        this.data = _native_setNew();
+    }
+
+    public fun void add(string key) {
+        this.data = _native_setAdd(this.data, key);
+    }
+
+    public fun bool has(string key) {
+        return _native_setHas(this.data, key);
+    }
+
+    public fun void remove(string key) {
+        this.data = _native_setRemove(this.data, key);
+    }
+
+    public fun int count() {
+        return _native_setCount(this.data);
+    }
+
+    public fun int size() {
+        return _native_setCount(this.data);
+    }
+
+    public fun bool isEmpty() {
+        return _native_setCount(this.data) == 0;
+    }
+
+    // Return a List of all keys
+    public fun List keys() {
+        List result = new List();
+        result.data = _native_setKeys(this.data);
+        return result;
+    }
+
+    // Union with another set -- returns new Set
+    public fun Set union(Set other) {
+        Set result = new Set();
+        List myKeys = this.keys();
+        int i = 0;
+        while (i < myKeys.length()) {
+            string k = myKeys.get(i) as string;
+            result.add(k);
+            i = i + 1;
+        }
+        List otherKeys = other.keys();
+        int j = 0;
+        while (j < otherKeys.length()) {
+            string k = otherKeys.get(j) as string;
+            result.add(k);
+            j = j + 1;
+        }
+        return result;
+    }
+}
+
+// ── StringBuilder ─────────────────────────────────────────────────────────────
+//
+//  Efficient mutable string builder for incremental string construction.
+//  Avoids O(n^2) string concatenation in tight loops.
+//
+class StringBuilder {
+    private var data;
+
+    public fun void init() {
+        this.data = _native_sbNew();
+    }
+
+    // Append a string
+    public fun StringBuilder append(string s) {
+        this.data = _native_sbAppendStr(this.data, s);
+        return this;
+    }
+
+    // Append a char
+    public fun StringBuilder appendChar(char c) {
+        this.data = _native_sbAppendChar(this.data, c);
+        return this;
+    }
+
+    // Append an int
+    public fun StringBuilder appendInt(int n) {
+        this.data = _native_sbAppendInt(this.data, n);
+        return this;
+    }
+
+    // Append a long
+    public fun StringBuilder appendLong(long n) {
+        this.data = _native_sbAppendLong(this.data, n);
+        return this;
+    }
+
+    // Append a bool as "true"/"false"
+    public fun StringBuilder appendBool(bool b) {
+        this.data = _native_sbAppendStr(this.data, b ? "true" : "false");
+        return this;
+    }
+
+    // Append a newline
+    public fun StringBuilder appendLine(string s) {
+        this.data = _native_sbAppendStr(this.data, s);
+        this.data = _native_sbAppendChar(this.data, '\n');
+        return this;
+    }
+
+    // Get current length in characters
+    public fun int length() {
+        return _native_sbLength(this.data);
+    }
+
+    public fun bool isEmpty() {
+        return _native_sbLength(this.data) == 0;
+    }
+
+    // Produce the final string
+    public fun string toString() {
+        return _native_sbToString(this.data);
+    }
+
+    // Reset to empty (reuses buffer)
+    public fun void clear() {
+        this.data = _native_sbClear(this.data);
+    }
+}

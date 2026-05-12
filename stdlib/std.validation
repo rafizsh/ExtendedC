@@ -1,0 +1,826 @@
+// ============================================================================
+//  std.validation  --  Input validation, schemas, and constraint predicates
+//  Import with:  import "std.validation";
+//
+//  Three layers:
+//
+//  1. Predicate functions — return bool, composable with && / ||
+//       isEmail(s)  isUrl(s)  isInteger(s)  isInRange(n,lo,hi)  etc.
+//
+//  2. Validator class — accumulates multiple field errors before failing,
+//       then returns a ValidationResult with all messages.
+//
+//  3. Schema — declare rules for a Map of string fields; validate in one call.
+//
+//  Usage:
+//
+//    // Simple predicate
+//    if (!isEmail(input)) { println("bad email"); }
+//
+//    // Validator (collects all errors)
+//    Validator v = new Validator(); v.init();
+//    v.check(stringLen(name) > 0,         "name",  "required");
+//    v.check(isEmail(email),               "email", "must be a valid email");
+//    v.check(isInRange(age, 0, 150),       "age",   "must be 0–150");
+//    if (v.hasErrors()) { println(v.summary()); }
+//
+//    // Schema
+//    Schema s = new Schema(); s.init();
+//    s.field("username").required().minLen(3).maxLen(20).alphanumeric();
+//    s.field("email").required().email();
+//    s.field("age").required().integer().inRange(0, 150);
+//    ValidationResult r = s.validate(data);
+//    if (!r.isValid()) { println(r.summary()); }
+// ============================================================================
+
+import "std.io";
+import "std.string";
+import "std.collections";
+import "std.errors";
+
+// ── String predicates ─────────────────────────────────────────────────────────
+
+// True if s contains only digits.
+fun bool isDigitsOnly(string s) {
+    int n = stringLen(s);
+    if (n == 0) { return false; }
+    int i = 0;
+    while (i < n) { if (!isDigit(s[i])) { return false; } i = i + 1; }
+    return true;
+}
+
+// True if s represents a valid integer (optional leading minus).
+fun bool isInteger(string s) {
+    int n = stringLen(s);
+    if (n == 0) { return false; }
+    int start = 0;
+    if (s[0] == '-') { start = 1; }
+    if (start >= n) { return false; }
+    int i = start;
+    while (i < n) { if (!isDigit(s[i])) { return false; } i = i + 1; }
+    return true;
+}
+
+// True if s represents a valid decimal number (e.g. "3.14", "-2", "0").
+fun bool isNumber(string s) {
+    int n = stringLen(s);
+    if (n == 0) { return false; }
+    int i = 0;
+    if (s[0] == '-') { i = 1; }
+    if (i >= n) { return false; }
+    bool seenDot = false;
+    bool seenDigit = false;
+    while (i < n) {
+        char c = s[i];
+        if (isDigit(c)) { seenDigit = true; }
+        else if (c == '.') {
+            if (seenDot) { return false; }
+            seenDot = true;
+        } else { return false; }
+        i = i + 1;
+    }
+    return seenDigit;
+}
+
+// True if s contains only ASCII letters.
+fun bool isAlphaOnly(string s) {
+    int n = stringLen(s);
+    if (n == 0) { return false; }
+    int i = 0;
+    while (i < n) { if (!isAlpha(s[i])) { return false; } i = i + 1; }
+    return true;
+}
+
+// True if s contains only ASCII letters and digits.
+fun bool isAlphanumeric(string s) {
+    int n = stringLen(s);
+    if (n == 0) { return false; }
+    int i = 0;
+    while (i < n) { if (!isAlnum(s[i])) { return false; } i = i + 1; }
+    return true;
+}
+
+// True if s contains only ASCII letters, digits, and the given extra chars.
+fun bool isAlnumWith(string s, string extra) {
+    int n = stringLen(s);
+    if (n == 0) { return false; }
+    int i = 0;
+    while (i < n) {
+        char c = s[i];
+        if (!isAlnum(c) && !contains(extra, charToString(c))) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// True if s looks like a valid email address (basic check).
+fun bool isEmail(string s) {
+    int n = stringLen(s);
+    if (n < 3) { return false; }
+    int atIdx = indexOf(s, "@");
+    if (atIdx < 1) { return false; }
+    string local  = substring(s, 0, atIdx);
+    string domain = substring(s, atIdx + 1, n);
+    if (stringLen(local)  == 0) { return false; }
+    if (stringLen(domain) < 3)  { return false; }
+    int dotIdx = lastIndexOf(domain, ".");
+    if (dotIdx < 1) { return false; }
+    if (dotIdx >= stringLen(domain) - 1) { return false; }
+    return true;
+}
+
+// True if s starts with http:// or https://.
+fun bool isUrl(string s) {
+    return startsWith(s, "http://") || startsWith(s, "https://");
+}
+
+// True if s has at least minLen characters.
+fun bool minLen(string s, int minLen2) { return stringLen(s) >= minLen2; }
+
+// True if s has at most maxLen characters.
+fun bool maxLen(string s, int maxLen2) { return stringLen(s) <= maxLen2; }
+
+// True if s has between lo and hi characters (inclusive).
+fun bool lenBetween(string s, int lo, int hi) {
+    int n = stringLen(s);
+    return n >= lo && n <= hi;
+}
+
+// True if s is not empty and not all whitespace.
+fun bool notBlank(string s) { return stringLen(trim(s)) > 0; }
+
+// True if s matches exactly (case-sensitive).
+fun bool isExact(string s, string expected) { return equals(s, expected); }
+
+// True if s is one of the given options.
+fun bool isOneOf(string s, List options) {
+    int i = 0;
+    while (i < options.length()) {
+        if (equals(s, options.get(i) as string)) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// True if s contains only printable ASCII (32–126).
+fun bool isPrintableAscii(string s) {
+    int n = stringLen(s);
+    int i = 0;
+    while (i < n) {
+        int c = charCode(s[i]);
+        if (c < 32 || c > 126) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// True if s has no leading or trailing whitespace.
+fun bool isTrimmed(string s) { return equals(s, trim(s)); }
+
+// True if s passes a custom predicate.
+fun bool matchesPred(string s, var pred) { return pred(s) as bool; }
+
+// ── Numeric predicates ────────────────────────────────────────────────────────
+
+// True if value is between lo and hi (inclusive).
+fun bool isInRange(int value, int lo, int hi) { return value >= lo && value <= hi; }
+
+// True if value is between lo and hi (inclusive) — double version.
+fun bool isInRangeD(double value, double lo, double hi) { return value >= lo && value <= hi; }
+
+// True if value is positive (> 0).
+fun bool isPositive(int value) { return value > 0; }
+
+// True if value is non-negative (>= 0).
+fun bool isNonNegative(int value) { return value >= 0; }
+
+// True if value is negative.
+fun bool isNegative(int value) { return value < 0; }
+
+// True if value is even.
+fun bool isEvenNum(int value) { return value % 2 == 0; }
+
+// True if value is odd.
+fun bool isOddNum(int value) { return value % 2 != 0; }
+
+// True if n is a multiple of divisor.
+fun bool isMultipleOf(int n, int divisor) {
+    if (divisor == 0) { return false; }
+    return n % divisor == 0;
+}
+
+// ── Common format validators ──────────────────────────────────────────────────
+
+// Validate an IPv4 address string "a.b.c.d".
+fun bool isIPv4(string s) {
+    List parts = new List();
+    int start = 0;
+    int i = 0;
+    int len = stringLen(s);
+    while (i <= len) {
+        if (i == len || s[i] == '.') {
+            parts.add(substring(s, start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    if (parts.length() != 4) { return false; }
+    int p = 0;
+    while (p < 4) {
+        string part = parts.get(p) as string;
+        if (!isDigitsOnly(part)) { return false; }
+        if (stringLen(part) == 0 || stringLen(part) > 3) { return false; }
+        int val = parseInt(part);
+        if (val < 0 || val > 255) { return false; }
+        p = p + 1;
+    }
+    return true;
+}
+
+// Validate a date string "YYYY-MM-DD".
+fun bool isDateYMD(string s) {
+    if (stringLen(s) != 10) { return false; }
+    if (s[4] != '-' || s[7] != '-') { return false; }
+    string ys = substring(s, 0, 4);
+    string ms2 = substring(s, 5, 7);
+    string ds = substring(s, 8, 10);
+    if (!isDigitsOnly(ys) || !isDigitsOnly(ms2) || !isDigitsOnly(ds)) { return false; }
+    int month = parseInt(ms2);
+    int day   = parseInt(ds);
+    return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+// Validate a time string "HH:MM" or "HH:MM:SS".
+fun bool isTime(string s) {
+    int n = stringLen(s);
+    if (n != 5 && n != 8) { return false; }
+    if (s[2] != ':') { return false; }
+    if (n == 8 && s[5] != ':') { return false; }
+    string hs = substring(s, 0, 2);
+    string ms3 = substring(s, 3, 5);
+    if (!isDigitsOnly(hs) || !isDigitsOnly(ms3)) { return false; }
+    int h = parseInt(hs); int m = parseInt(ms3);
+    if (h < 0 || h > 23 || m < 0 || m > 59) { return false; }
+    if (n == 8) {
+        string ss = substring(s, 6, 8);
+        if (!isDigitsOnly(ss)) { return false; }
+        int sec = parseInt(ss);
+        if (sec < 0 || sec > 59) { return false; }
+    }
+    return true;
+}
+
+// Validate a hex colour "#RGB" or "#RRGGBB".
+fun bool isHexColor(string s) {
+    int n = stringLen(s);
+    if (n != 4 && n != 7) { return false; }
+    if (s[0] != '#') { return false; }
+    int i = 1;
+    while (i < n) {
+        char c = s[i];
+        bool valid = isDigit(c) ||
+                     (c >= 'a' && c <= 'f') ||
+                     (c >= 'A' && c <= 'F');
+        if (!valid) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// Validate a credit card number (Luhn algorithm).
+fun bool isLuhn(string s) {
+    int n = stringLen(s);
+    if (n < 2) { return false; }
+    int sum = 0;
+    bool alt = false;
+    int i = n - 1;
+    while (i >= 0) {
+        if (!isDigit(s[i])) { return false; }
+        int d = charCode(s[i]) - charCode('0');
+        if (alt) {
+            d = d * 2;
+            if (d > 9) { d = d - 9; }
+        }
+        sum = sum + d;
+        alt = !alt;
+        i = i - 1;
+    }
+    return sum % 10 == 0;
+}
+
+// ── ValidationError ───────────────────────────────────────────────────────────
+
+// One validation failure: a field name and a message.
+class ValidationError {
+    public string field;
+    public string message;
+    public string rule;     // which rule failed (e.g. "required", "minLen")
+
+    public fun void init() {
+        this.field = ""; this.message = ""; this.rule = "";
+    }
+    public fun void setup(string field, string message, string rule) {
+        this.field = field; this.message = message; this.rule = rule;
+    }
+
+    public fun string toString() {
+        return this.field + ": " + this.message;
+    }
+}
+
+// ── ValidationResult ──────────────────────────────────────────────────────────
+
+// The outcome of a validation — may carry zero or more errors.
+class ValidationResult {
+    public List errors;   // List of ValidationError
+
+    public fun void init() {
+        this.errors = new List();
+    }
+
+    public fun void addError(string field, string message, string rule) {
+        ValidationError e = new ValidationError(); e.init(); e.setup(field, message, rule);
+        this.errors.add(e);
+    }
+
+    // True if no errors were recorded.
+    public fun bool isValid() { return this.errors.isEmpty(); }
+
+    // True if any errors were recorded.
+    public fun bool hasErrors() { return !this.errors.isEmpty(); }
+
+    // Number of errors.
+    public fun int errorCount() { return this.errors.length(); }
+
+    // All errors for a specific field.
+    public fun List errorsFor(string field) {
+        List r = new List();
+        int i = 0;
+        while (i < this.errors.length()) {
+            ValidationError e = this.errors.get(i) as ValidationError;
+            if (equals(e.field, field)) { r.add(e); }
+            i = i + 1;
+        }
+        return r;
+    }
+
+    // True if the given field has any errors.
+    public fun bool hasErrorFor(string field) {
+        return !this.errorsFor(field).isEmpty();
+    }
+
+    // First error message for a field, or "" if none.
+    public fun string firstError(string field) {
+        List fe = this.errorsFor(field);
+        if (fe.isEmpty()) { return ""; }
+        return (fe.get(0) as ValidationError).message;
+    }
+
+    // All errors as a Map of field → first error message.
+    public fun Map toMap() {
+        Map m = new Map();
+        int i = 0;
+        while (i < this.errors.length()) {
+            ValidationError e = this.errors.get(i) as ValidationError;
+            if (!m.has(e.field)) { m.set(e.field, e.message); }
+            i = i + 1;
+        }
+        return m;
+    }
+
+    // Human-readable summary of all errors, one per line.
+    public fun string summary() {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < this.errors.length()) {
+            ValidationError e = this.errors.get(i) as ValidationError;
+            if (i > 0) { sb.appendChar('\n'); }
+            sb.append(e.toString());
+            i = i + 1;
+        }
+        return sb.toString();
+    }
+
+    // Throw if invalid — formats all errors into the exception string.
+    public fun void orThrow() throws {
+        if (!this.isValid()) {
+            throw "Validation failed:\n" + this.summary();
+        }
+    }
+
+    // Convert to a Result: valid → Ok(null), invalid → Err(summary).
+    public fun Result toResult() {
+        if (this.isValid()) { return ok(null); }
+        return err(this.summary());
+    }
+
+    // Merge another ValidationResult's errors into this one.
+    public fun void merge(ValidationResult other) {
+        int i = 0;
+        while (i < other.errors.length()) {
+            this.errors.add(other.errors.get(i));
+            i = i + 1;
+        }
+    }
+}
+
+// ── Validator — imperative accumulator ────────────────────────────────────────
+
+// Collects errors from multiple check() calls, then returns them all at once.
+class Validator {
+    private ValidationResult result;
+
+    public fun void init() {
+        this.result = new ValidationResult();
+        this.result.init();
+    }
+
+    // Add an error if condition is false.
+    public fun Validator check(bool condition, string field, string message) {
+        if (!condition) {
+            this.result.addError(field, message, "check");
+        }
+        return this;
+    }
+
+    // Add an error with a specific rule name.
+    public fun Validator checkRule(bool condition, string field, string message, string rule) {
+        if (!condition) {
+            this.result.addError(field, message, rule);
+        }
+        return this;
+    }
+
+    // Require a string field to be non-blank.
+    public fun Validator required(string field, string value) {
+        return this.check(notBlank(value), field, "is required");
+    }
+
+    // Require a string field to have at least n characters.
+    public fun Validator minLength(string field, string value, int n) {
+        return this.check(minLen(value, n), field,
+            "must be at least " + toString(n) + " characters");
+    }
+
+    // Require a string field to have at most n characters.
+    public fun Validator maxLength(string field, string value, int n) {
+        return this.check(maxLen(value, n), field,
+            "must be at most " + toString(n) + " characters");
+    }
+
+    // Require a string field to be a valid email.
+    public fun Validator email(string field, string value) {
+        return this.check(isEmail(value), field, "must be a valid email address");
+    }
+
+    // Require a string field to be a valid URL.
+    public fun Validator url(string field, string value) {
+        return this.check(isUrl(value), field, "must be a valid URL (http:// or https://)");
+    }
+
+    // Require a string field to be an integer string.
+    public fun Validator integer(string field, string value) {
+        return this.check(isInteger(value), field, "must be a whole number");
+    }
+
+    // Require a string field to be a number.
+    public fun Validator number(string field, string value) {
+        return this.check(isNumber(value), field, "must be a number");
+    }
+
+    // Require a string field to be alphanumeric.
+    public fun Validator alphanumeric(string field, string value) {
+        return this.check(isAlphanumeric(value), field, "must contain only letters and digits");
+    }
+
+    // Require an integer to be in range.
+    public fun Validator inRange(string field, int value, int lo, int hi) {
+        return this.check(isInRange(value, lo, hi), field,
+            "must be between " + toString(lo) + " and " + toString(hi));
+    }
+
+    // Require a string field to be one of a set of values.
+    public fun Validator oneOf(string field, string value, List allowed) {
+        return this.check(isOneOf(value, allowed), field,
+            "must be one of the allowed values");
+    }
+
+    // Require a string field to match a custom predicate.
+    public fun Validator matches(string field, string value, var pred, string message) {
+        return this.check(pred(value) as bool, field, message);
+    }
+
+    // Require a string field to be a valid date (YYYY-MM-DD).
+    public fun Validator date(string field, string value) {
+        return this.check(isDateYMD(value), field, "must be a valid date (YYYY-MM-DD)");
+    }
+
+    // True if any errors have been recorded so far.
+    public fun bool hasErrors() { return this.result.hasErrors(); }
+
+    // Number of errors recorded.
+    public fun int errorCount() { return this.result.errorCount(); }
+
+    // Return the accumulated ValidationResult.
+    public fun ValidationResult getResult() { return this.result; }
+
+    // Throw if any errors were recorded.
+    public fun void orThrow() { this.result.orThrow(); }
+
+    // Return a Result (Ok if valid, Err with summary if invalid).
+    public fun Result toResult() { return this.result.toResult(); }
+}
+
+// ── FieldRule — a single rule in a Schema ─────────────────────────────────────
+
+class FieldRule {
+    public string ruleType;   // "required","minLen","maxLen","email","integer","range","oneOf","custom","regex"
+    public int    intArg1;
+    public int    intArg2;
+    public string strArg;
+    public List   listArg;
+    public var    fnArg;
+    public string message;    // custom error message (empty = use default)
+
+    public fun void init() {
+        this.ruleType = ""; this.intArg1 = 0; this.intArg2 = 0;
+        this.strArg = ""; this.listArg = null; this.fnArg = null; this.message = "";
+    }
+    public fun void setup(string ruleType) { this.ruleType = ruleType; }
+
+    public fun bool apply(string value) {
+        if (this.ruleType == "required")     { return notBlank(value); }
+        if (this.ruleType == "minLen")       { return minLen(value, this.intArg1); }
+        if (this.ruleType == "maxLen")       { return maxLen(value, this.intArg1); }
+        if (this.ruleType == "email")        { return isEmail(value); }
+        if (this.ruleType == "url")          { return isUrl(value); }
+        if (this.ruleType == "integer")      { return isInteger(value); }
+        if (this.ruleType == "number")       { return isNumber(value); }
+        if (this.ruleType == "alphanumeric") { return isAlphanumeric(value); }
+        if (this.ruleType == "notBlank")     { return notBlank(value); }
+        if (this.ruleType == "trimmed")      { return isTrimmed(value); }
+        if (this.ruleType == "date")         { return isDateYMD(value); }
+        if (this.ruleType == "time")         { return isTime(value); }
+        if (this.ruleType == "ipv4")         { return isIPv4(value); }
+        if (this.ruleType == "hexColor")     { return isHexColor(value); }
+        if (this.ruleType == "oneOf") {
+            if (this.listArg != null) { return isOneOf(value, this.listArg); }
+            return false;
+        }
+        if (this.ruleType == "custom") {
+            if (this.fnArg != null) { return this.fnArg(value) as bool; }
+            return true;
+        }
+        if (this.ruleType == "range") {
+            if (!isInteger(value)) { return false; }
+            int v = parseInt(value);
+            return isInRange(v, this.intArg1, this.intArg2);
+        }
+        return true;
+    }
+
+    public fun string defaultMessage(string field) {
+        if (this.ruleType == "required")     { return field + " is required"; }
+        if (this.ruleType == "minLen")       { return field + " must be at least " + toString(this.intArg1) + " characters"; }
+        if (this.ruleType == "maxLen")       { return field + " must be at most " + toString(this.intArg1) + " characters"; }
+        if (this.ruleType == "email")        { return field + " must be a valid email address"; }
+        if (this.ruleType == "url")          { return field + " must be a valid URL"; }
+        if (this.ruleType == "integer")      { return field + " must be a whole number"; }
+        if (this.ruleType == "number")       { return field + " must be a number"; }
+        if (this.ruleType == "alphanumeric") { return field + " must contain only letters and digits"; }
+        if (this.ruleType == "notBlank")     { return field + " must not be blank"; }
+        if (this.ruleType == "trimmed")      { return field + " must not have leading or trailing spaces"; }
+        if (this.ruleType == "date")         { return field + " must be a valid date (YYYY-MM-DD)"; }
+        if (this.ruleType == "time")         { return field + " must be a valid time (HH:MM or HH:MM:SS)"; }
+        if (this.ruleType == "ipv4")         { return field + " must be a valid IPv4 address"; }
+        if (this.ruleType == "hexColor")     { return field + " must be a valid hex colour (#RGB or #RRGGBB)"; }
+        if (this.ruleType == "oneOf")        { return field + " must be one of the allowed values"; }
+        if (this.ruleType == "range")        { return field + " must be between " + toString(this.intArg1) + " and " + toString(this.intArg2); }
+        if (stringLen(this.message) > 0)     { return this.message; }
+        return field + " is invalid";
+    }
+}
+
+// ── FieldSchema — rules for a single field ────────────────────────────────────
+
+class FieldSchema {
+    public string fieldName;
+    public List   rules;      // List of FieldRule
+    public bool   optional;   // if true, empty/absent value skips all other rules
+
+    public fun void init() {
+        this.fieldName = ""; this.rules = new List(); this.optional = false;
+    }
+    public fun void setup(string name) { this.fieldName = name; }
+
+    fun FieldRule addRule(string ruleType) {
+        FieldRule r = new FieldRule(); r.init(); r.setup(ruleType);
+        this.rules.add(r);
+        return r;
+    }
+
+    // ── Rule builders (chainable) ─────────────────────────────────────────────
+
+    public fun FieldSchema required() {
+        this.addRule("required");
+        return this;
+    }
+
+    public fun FieldSchema optional2() {
+        this.optional = true;
+        return this;
+    }
+
+    public fun FieldSchema minLen(int n) {
+        FieldRule r = this.addRule("minLen"); r.intArg1 = n;
+        return this;
+    }
+
+    public fun FieldSchema maxLen(int n) {
+        FieldRule r = this.addRule("maxLen"); r.intArg1 = n;
+        return this;
+    }
+
+    public fun FieldSchema lenBetween2(int lo, int hi) {
+        this.minLen(lo); this.maxLen(hi);
+        return this;
+    }
+
+    public fun FieldSchema email() {
+        this.addRule("email");
+        return this;
+    }
+
+    public fun FieldSchema url() {
+        this.addRule("url");
+        return this;
+    }
+
+    public fun FieldSchema integer() {
+        this.addRule("integer");
+        return this;
+    }
+
+    public fun FieldSchema number() {
+        this.addRule("number");
+        return this;
+    }
+
+    public fun FieldSchema alphanumeric() {
+        this.addRule("alphanumeric");
+        return this;
+    }
+
+    public fun FieldSchema notBlank() {
+        this.addRule("notBlank");
+        return this;
+    }
+
+    public fun FieldSchema trimmed() {
+        this.addRule("trimmed");
+        return this;
+    }
+
+    public fun FieldSchema date() {
+        this.addRule("date");
+        return this;
+    }
+
+    public fun FieldSchema time() {
+        this.addRule("time");
+        return this;
+    }
+
+    public fun FieldSchema ipv4() {
+        this.addRule("ipv4");
+        return this;
+    }
+
+    public fun FieldSchema hexColor() {
+        this.addRule("hexColor");
+        return this;
+    }
+
+    public fun FieldSchema inRange(int lo, int hi) {
+        FieldRule r = this.addRule("range"); r.intArg1 = lo; r.intArg2 = hi;
+        return this;
+    }
+
+    public fun FieldSchema oneOf(List allowed) {
+        FieldRule r = this.addRule("oneOf"); r.listArg = allowed;
+        return this;
+    }
+
+    public fun FieldSchema custom(var pred, string message) {
+        FieldRule r = this.addRule("custom"); r.fnArg = pred; r.message = message;
+        return this;
+    }
+
+    // Validate a single value against all rules.
+    public fun void validate(string value, ValidationResult result) {
+        bool empty = !notBlank(value);
+        if (empty && this.optional) { return; }
+
+        int i = 0;
+        while (i < this.rules.length()) {
+            FieldRule rule = this.rules.get(i) as FieldRule;
+            if (!rule.apply(value)) {
+                string msg = stringLen(rule.message) > 0
+                    ? rule.message
+                    : rule.defaultMessage(this.fieldName);
+                result.addError(this.fieldName, msg, rule.ruleType);
+            }
+            i = i + 1;
+        }
+    }
+}
+
+// ── Schema — validate a whole Map of fields ───────────────────────────────────
+
+class Schema {
+    private List   fields;      // List of FieldSchema
+    private Map    fieldIndex2; // fieldName → FieldSchema for quick lookup
+
+    public fun void init() {
+        this.fields      = new List();
+        this.fieldIndex2 = new Map();
+    }
+
+    // Declare a field and return its FieldSchema for rule chaining.
+    public fun FieldSchema field(string name) {
+        FieldSchema fs = new FieldSchema(); fs.init(); fs.setup(name);
+        this.fields.add(fs);
+        this.fieldIndex2.set(name, fs);
+        return fs;
+    }
+
+    // Validate a Map of string → string values.
+    // Returns a ValidationResult with all errors.
+    public fun ValidationResult validate(Map data) {
+        ValidationResult result = new ValidationResult(); result.init();
+
+        int i = 0;
+        while (i < this.fields.length()) {
+            FieldSchema fs = this.fields.get(i) as FieldSchema;
+            string value = "";
+            if (data.has(fs.fieldName)) {
+                value = data.get(fs.fieldName) as string;
+            }
+            fs.validate(value, result);
+            i = i + 1;
+        }
+
+        return result;
+    }
+
+    // Validate and throw on first error.
+    public fun void validateOrThrow(Map data) {
+        this.validate(data).orThrow();
+    }
+
+    // Validate and return Result.
+    public fun Result validateResult(Map data) {
+        return this.validate(data).toResult();
+    }
+}
+
+// ── Convenience: quick validate helpers ──────────────────────────────────────
+
+// Validate a single email string. Returns ValidationResult.
+fun ValidationResult validateEmail(string value) {
+    Validator v = new Validator(); v.init();
+    v.required("email", value);
+    v.email("email", value);
+    return v.getResult();
+}
+
+// Validate a URL string.
+fun ValidationResult validateUrl(string value) {
+    Validator v = new Validator(); v.init();
+    v.required("url", value);
+    v.url("url", value);
+    return v.getResult();
+}
+
+// Validate an integer string in range.
+fun ValidationResult validateIntRange(string field, string value, int lo, int hi) {
+    Validator v = new Validator(); v.init();
+    v.required(field, value);
+    v.integer(field, value);
+    if (isInteger(value)) {
+        v.inRange(field, parseInt(value), lo, hi);
+    }
+    return v.getResult();
+}
+
+// Validate a password: at least minLen chars, at least one digit.
+fun ValidationResult validatePassword(string value, int minLenReq) {
+    Validator v = new Validator(); v.init();
+    v.required("password", value);
+    v.minLength("password", value, minLenReq);
+    bool hasDigit = false;
+    int i = 0;
+    while (i < stringLen(value)) { if (isDigit(value[i])) { hasDigit = true; } i = i + 1; }
+    v.check(hasDigit, "password", "must contain at least one digit");
+    return v.getResult();
+}

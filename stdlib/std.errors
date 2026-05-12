@@ -1,0 +1,450 @@
+// ============================================================================
+//  std.errors  --  Result and Option types, error codes, error handling
+//  Import with:  import "std.errors";
+//
+//  Two core types:
+//
+//    Result  — represents either success (Ok) or failure (Err).
+//              Carry a value on success, an error message on failure.
+//
+//    Option  — represents either a present value (Some) or absence (None).
+//
+//  Both use var internally (type erasure).  Cast the payload with `as`.
+//
+//  Usage:
+//
+//    Result r = ok(42);
+//    if (r.isOk()) { println(toString(r.value() as int)); }
+//
+//    Result r2 = err("file not found");
+//    if (r2.isErr()) { println(r2.error()); }
+//
+//    // Chaining
+//    Result r3 = parseNumber("123")
+//        .mapOk((var v) => (v as int) * 2)
+//        .orElse(err("parse failed"));
+//
+//    Option o = some("hello");
+//    string s = o.valueOr("default") as string;
+//
+//    // Unwrap (throws on failure)
+//    int n = parseNumber("42").unwrap() as int;
+// ============================================================================
+
+import "std.io";
+import "std.string";
+import "std.collections";
+
+// ── Result ────────────────────────────────────────────────────────────────────
+
+// Result represents either success (Ok) or failure (Err).
+class Result {
+    private bool  ok;      // true = Ok, false = Err
+    private var   val;     // payload on Ok
+    private string msg;    // error message on Err
+    private string code;   // optional error code (e.g. "NOT_FOUND")
+
+    public fun void init() {
+        this.ok   = true;
+        this.val  = null;
+        this.msg  = "";
+        this.code = "";
+    }
+
+    // Internal factory helpers — use ok() / err() free functions below.
+    public fun void setOk(var value) {
+        this.ok  = true;
+        this.val = value;
+        this.msg = "";
+    }
+
+    public fun void setErr(string message, string code) {
+        this.ok   = false;
+        this.val  = null;
+        this.msg  = message;
+        this.code = code;
+    }
+
+    // ── State queries ─────────────────────────────────────────────────────────
+
+    // True if this Result holds a success value.
+    public fun bool isOk()  { return this.ok; }
+
+    // True if this Result holds an error.
+    public fun bool isErr() { return !this.ok; }
+
+    // ── Payload access ────────────────────────────────────────────────────────
+
+    // Return the success value, or null if this is an Err.
+    public fun var value() {
+        if (!this.ok) { return null; }
+        return this.val;
+    }
+
+    // Return the error message, or "" if this is an Ok.
+    public fun string error() {
+        if (this.ok) { return ""; }
+        return this.msg;
+    }
+
+    // Return the error code, or "" if this is an Ok or has no code.
+    public fun string errorCode() { return this.code; }
+
+    // Unwrap the success value — throws if this is an Err.
+    public fun var unwrap() throws {
+        if (!this.ok) { throw "Result.unwrap() called on Err: " + this.msg; }
+        return this.val;
+    }
+
+    // Unwrap with a custom panic message.
+    public fun var expect(string msg) throws {
+        if (!this.ok) { throw msg + ": " + this.msg; }
+        return this.val;
+    }
+
+    // Return the success value, or a default if this is an Err.
+    public fun var valueOr(var defaultVal) {
+        if (this.ok) { return this.val; }
+        return defaultVal;
+    }
+
+    // Unwrap the error — throws if this is an Ok.
+    public fun string unwrapErr() throws {
+        if (this.ok) { throw "Result.unwrapErr() called on Ok"; }
+        return this.msg;
+    }
+
+    // ── Transformation ────────────────────────────────────────────────────────
+
+    // Apply transform(value) and return a new Result.
+    // If this is an Err, propagate the error unchanged.
+    public fun Result mapOk(var transform) {
+        if (!this.ok) { return this; }
+        var _v = transform(this.val);
+        Result _r = new Result(); _r.init(); _r.setOk(_v);
+        return _r;
+    }
+
+    // Apply transform(message) to the error and return a new Result.
+    // If this is an Ok, return it unchanged.
+    public fun Result mapErr(var transform) {
+        if (this.ok) { return this; }
+        return err(transform(this.msg) as string);
+    }
+
+    // If this is Ok, call next(value) which must return a Result.
+    // If this is Err, propagate unchanged. (flatMap / andThen)
+    public fun Result andThen(var next) {
+        if (!this.ok) { return this; }
+        return next(this.val) as Result;
+    }
+
+    // If this is Err, return the given fallback Result instead.
+    public fun Result orElse(Result fallback) {
+        if (this.ok) { return this; }
+        return fallback;
+    }
+
+    // If this is Err, call recover(error) which must return a Result.
+    public fun Result recover(var recoverFn) {
+        if (this.ok) { return this; }
+        return recoverFn(this.msg) as Result;
+    }
+
+    // ── Side effects ──────────────────────────────────────────────────────────
+
+    // Call action(value) if Ok; return this unchanged.
+    public fun Result onOk(var action) {
+        if (this.ok) { action(this.val); }
+        return this;
+    }
+
+    // Call action(message) if Err; return this unchanged.
+    public fun Result onErr(var action) {
+        if (!this.ok) { action(this.msg); }
+        return this;
+    }
+
+    // ── Conversion ────────────────────────────────────────────────────────────
+
+    // Convert to an Option: Ok(v) → Some(v), Err → None.
+    public fun Option toOption() {
+        if (this.ok) { return some(this.val); }
+        return none();
+    }
+
+    // Throw the error if this is an Err; otherwise return the success value.
+    public fun var orThrow() throws {
+        if (!this.ok) { throw this.msg; }
+        return this.val;
+    }
+
+    // ── Display ───────────────────────────────────────────────────────────────
+
+    public fun string toString() {
+        if (this.ok) { return "Ok(...)"; }
+        string s = "Err(\"" + this.msg + "\"";
+        if (stringLen(this.code) > 0) { s = s + " [" + this.code + "]"; }
+        return s + ")";
+    }
+}
+
+// ── Result constructors ───────────────────────────────────────────────────────
+
+// Create a successful Result carrying value.
+fun Result ok(var value) {
+    Result r = new Result(); r.init();
+    r.setOk(value);
+    return r;
+}
+
+// Create a failed Result with message.
+fun Result err(string message) {
+    Result r = new Result(); r.init();
+    r.setErr(message, "");
+    return r;
+}
+
+// Create a failed Result with message and error code.
+fun Result errCode(string message, string code) {
+    Result r = new Result(); r.init();
+    r.setErr(message, code);
+    return r;
+}
+
+// ── Option ────────────────────────────────────────────────────────────────────
+
+// Option represents either a present value (Some) or absence (None).
+class Option {
+    private bool present;
+    private var  val;
+
+    public fun void init() {
+        this.present = false;
+        this.val     = null;
+    }
+
+    public fun void setPresent(var value) {
+        this.present = true;
+        this.val     = value;
+    }
+
+    // ── State queries ─────────────────────────────────────────────────────────
+
+    // True if a value is present.
+    public fun bool isSome() { return this.present; }
+
+    // True if no value is present.
+    public fun bool isNone() { return !this.present; }
+
+    // ── Payload access ────────────────────────────────────────────────────────
+
+    // Return the value, or null if None.
+    public fun var value() {
+        if (!this.present) { return null; }
+        return this.val;
+    }
+
+    // Return the value, or a default if None.
+    public fun var valueOr(var defaultVal) {
+        if (this.present) { return this.val; }
+        return defaultVal;
+    }
+
+    // Unwrap — throws if None.
+    public fun var unwrap() throws {
+        if (!this.present) { throw "Option.unwrap() called on None"; }
+        return this.val;
+    }
+
+    // Unwrap with custom message — throws if None.
+    public fun var expect(string msg) throws {
+        if (!this.present) { throw msg; }
+        return this.val;
+    }
+
+    // ── Transformation ────────────────────────────────────────────────────────
+
+    // Apply transform(value) and return a new Option. None propagates.
+    public fun Option map(var transform) {
+        if (!this.present) { return this; }
+        return some(transform(this.val));
+    }
+
+    // If Some, call next(value) → Option; if None, return None. (flatMap)
+    public fun Option andThen(var next) {
+        if (!this.present) { return this; }
+        return next(this.val) as Option;
+    }
+
+    // Return this if Some; return fallback if None.
+    public fun Option orElse(Option fallback) {
+        if (this.present) { return this; }
+        return fallback;
+    }
+
+    // Filter: return None if predicate is false.
+    public fun Option filter(var pred) {
+        if (!this.present) { return this; }
+        if (pred(this.val) as bool) { return this; }
+        return none();
+    }
+
+    // ── Side effects ──────────────────────────────────────────────────────────
+
+    public fun Option onSome(var action) {
+        if (this.present) { action(this.val); }
+        return this;
+    }
+
+    public fun Option onNone(var action) {
+        if (!this.present) { action(null); }
+        return this;
+    }
+
+    // ── Conversion ────────────────────────────────────────────────────────────
+
+    // Convert to Result: Some(v) → Ok(v), None → Err(message).
+    public fun Result toResult(string errMsg) {
+        if (this.present) { return ok(this.val); }
+        return err(errMsg);
+    }
+
+    public fun string toString() {
+        if (this.present) { return "Some(...)"; }
+        return "None";
+    }
+}
+
+// ── Option constructors ───────────────────────────────────────────────────────
+
+// Create a Some option containing value.
+fun Option some(var value) {
+    Option o = new Option(); o.init();
+    o.setPresent(value);
+    return o;
+}
+
+// Create a None option.
+fun Option none() {
+    Option o = new Option(); o.init();
+    return o;
+}
+
+// Wrap a value — returns None if value is null, Some otherwise.
+fun Option optionOf(var value) {
+    if (value == null) { return none(); }
+    return some(value);
+}
+
+// ── Error code constants ──────────────────────────────────────────────────────
+
+// Standard error codes for use with errCode().
+string ERR_NOT_FOUND      = "NOT_FOUND";
+string ERR_INVALID_ARG    = "INVALID_ARG";
+string ERR_OUT_OF_RANGE   = "OUT_OF_RANGE";
+string ERR_IO             = "IO_ERROR";
+string ERR_PERMISSION     = "PERMISSION_DENIED";
+string ERR_TIMEOUT        = "TIMEOUT";
+string ERR_OVERFLOW       = "OVERFLOW";
+string ERR_UNDERFLOW      = "UNDERFLOW";
+string ERR_PARSE          = "PARSE_ERROR";
+string ERR_NULL           = "NULL_POINTER";
+string ERR_STATE          = "INVALID_STATE";
+string ERR_UNIMPLEMENTED  = "UNIMPLEMENTED";
+string ERR_CANCELLED      = "CANCELLED";
+string ERR_NETWORK        = "NETWORK_ERROR";
+string ERR_AUTH           = "AUTH_ERROR";
+
+// ── Utility functions ─────────────────────────────────────────────────────────
+
+// Try a closure that may throw; returns Ok(value) or Err(message).
+fun Result tryRun(var fn) {
+    try {
+        var v = fn(null);
+        return ok(v);
+    } catch (Exception e) {
+        return err(e);
+    }
+}
+
+// Run fn(); if it throws, return Err. Good for void operations.
+fun Result tryDo(var fn) {
+    try {
+        fn(null);
+        return ok(null);
+    } catch (Exception e) {
+        return err(e);
+    }
+}
+
+// Collect a List of Results into a Result of List.
+// Returns Ok(List of values) if all are Ok, Err of first failure otherwise.
+fun Result collectResults(List results) {
+    List values = new List();
+    int i = 0;
+    while (i < results.length()) {
+        Result r = results.get(i) as Result;
+        if (r.isErr()) { return r; }
+        values.add(r.value());
+        i = i + 1;
+    }
+    return ok(values);
+}
+
+// Run each result in sequence; stop and return first Err.
+fun Result sequence(List results) {
+    return collectResults(results);
+}
+
+// Return the first Ok result, or Err if all failed.
+fun Result firstOk(List results) {
+    string lastErr = "all alternatives failed";
+    int i = 0;
+    while (i < results.length()) {
+        Result r = results.get(i) as Result;
+        if (r.isOk()) { return r; }
+        lastErr = r.error();
+        i = i + 1;
+    }
+    return err(lastErr);
+}
+
+// Partition a List of Results into [okValues, errMessages].
+fun List partitionResults(List results) {
+    List okVals  = new List();
+    List errMsgs = new List();
+    int i = 0;
+    while (i < results.length()) {
+        Result r = results.get(i) as Result;
+        if (r.isOk()) { okVals.add(r.value()); }
+        else          { errMsgs.add(r.error()); }
+        i = i + 1;
+    }
+    List out = new List();
+    out.add(okVals);
+    out.add(errMsgs);
+    return out;
+}
+
+// Return true if all Results are Ok.
+fun bool allOk(List results) {
+    int i = 0;
+    while (i < results.length()) {
+        Result r = results.get(i) as Result;
+        if (r.isErr()) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// Return true if any Result is Ok.
+fun bool anyOk(List results) {
+    int i = 0;
+    while (i < results.length()) {
+        Result r = results.get(i) as Result;
+        if (r.isOk()) { return true; }
+        i = i + 1;
+    }
+    return false;
+}

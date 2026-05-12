@@ -1,0 +1,195 @@
+// ============================================================================
+//  std.string  –  String manipulation library
+//  Import with:  import "std.string";
+// ============================================================================
+
+// ── Basic operations ──────────────────────────────────────────────────────────
+
+// Return the number of characters in s.
+fun int stringLen(string s) {
+    return _nativeStringLen(s);
+}
+
+// Return the character at position i (0-based).
+// Throws if i is out of bounds.
+fun char charAt(string s, int i) throws {
+    if (i < 0 || i >= stringLen(s)) {
+        throw "charAt: index out of bounds";
+    }
+    return _nativeCharAt(s, i);
+}
+
+// Return a substring from start (inclusive) to end (exclusive).
+// Throws if indices are invalid.
+fun string substring(string s, int start, int end) throws {
+    int len = stringLen(s);
+    if (start < 0 || end > len || start > end) {
+        throw "substring: invalid range";
+    }
+    string result = "";
+    int i = start;
+    while (i < end) {
+        result = result + charAt(s, i);
+        i = i + 1;
+    }
+    return result;
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+
+// Return the index of the first occurrence of needle in haystack,
+// or -1 if not found.
+fun int indexOf(string haystack, string needle) {
+    int hLen = stringLen(haystack);
+    int nLen = stringLen(needle);
+    if (nLen == 0) {
+        return 0;
+    }
+    int i = 0;
+    while (i <= hLen - nLen) {
+        int j = 0;
+        bool match = true;
+        while (j < nLen) {
+            if (charAt(haystack, i + j) != charAt(needle, j)) {
+                match = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if (match) {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Return true if haystack contains needle.
+fun bool contains(string haystack, string needle) {
+    return indexOf(haystack, needle) >= 0;
+}
+
+// Return true if s starts with prefix.
+fun bool startsWith(string s, string prefix) {
+    int pLen = stringLen(prefix);
+    if (pLen > stringLen(s)) {
+        return false;
+    }
+    int i = 0;
+    while (i < pLen) {
+        if (charAt(s, i) != charAt(prefix, i)) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// Return true if s ends with suffix.
+fun bool endsWith(string s, string suffix) {
+    int sLen = stringLen(s);
+    int sufLen = stringLen(suffix);
+    if (sufLen > sLen) {
+        return false;
+    }
+    int offset = sLen - sufLen;
+    int i = 0;
+    while (i < sufLen) {
+        if (charAt(s, offset + i) != charAt(suffix, i)) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ── Transformation ────────────────────────────────────────────────────────────
+
+// Return a copy of s with all ASCII uppercase letters lowercased.
+fun string toLower(string s) {
+    string result = "";
+    int len = stringLen(s);
+    int i = 0;
+    while (i < len) {
+        char c = charAt(s, i);
+        if (c >= 'A' && c <= 'Z') {
+            result = result + _nativeCharAdd(c, 32);
+        } else {
+            result = result + c;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// Return a copy of s with all ASCII lowercase letters uppercased.
+fun string toUpper(string s) {
+    string result = "";
+    int len = stringLen(s);
+    int i = 0;
+    while (i < len) {
+        char c = charAt(s, i);
+        if (c >= 'a' && c <= 'z') {
+            result = result + _nativeCharSub(c, 32);
+        } else {
+            result = result + c;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// Return s with leading and trailing whitespace removed.
+fun string trim(string s) {
+    int len = stringLen(s);
+    int start = 0;
+    int end = len;
+
+    while (start < len && (charAt(s, start) == ' ' || charAt(s, start) == '\t' || charAt(s, start) == '\n')) {
+        start = start + 1;
+    }
+    while (end > start && (charAt(s, end - 1) == ' ' || charAt(s, end - 1) == '\t' || charAt(s, end - 1) == '\n')) {
+        end = end - 1;
+    }
+    return substring(s, start, end);
+}
+
+// Return s repeated n times.
+fun string repeat(string s, int n) {
+    string result = "";
+    int i = 0;
+    while (i < n) {
+        result = result + s;
+        i = i + 1;
+    }
+    return result;
+}
+
+// ── Conversion ────────────────────────────────────────────────────────────────
+
+// Parse a decimal integer string; behaviour on invalid input is undefined.
+fun int parseInt(string s) {
+    return _nativeParseInt(s);
+}
+
+// Parse a floating-point string; behaviour on invalid input is undefined.
+fun float parseFloat(string s) {
+    return _nativeParseFloat(s);
+}
+
+// Convert an integer to its decimal string representation.
+fun string toString(int n) {
+    return _nativeIntToString(n);
+}
+
+// Convert a float to its string representation.
+fun string floatToString(float f) {
+    return _nativeFloatToString(f);
+}
+
+// Convert a char to a one-character string.
+fun string charToString(char c) {
+    string s = "";
+    s = s + c;
+    return s;
+}

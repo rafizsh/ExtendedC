@@ -1,0 +1,653 @@
+// ============================================================================
+//  std.vector  --  2D, 3D, and 4D vector and matrix math
+//  Import with:  import "std.vector";
+//
+//  Classes:
+//    Vec2   — 2D vector (x, y)
+//    Vec3   — 3D vector (x, y, z)
+//    Vec4   — 4D vector / quaternion (x, y, z, w)
+//    Mat3   — 3×3 column-major matrix
+//    Mat4   — 4×4 column-major matrix (homogeneous transform)
+//    Color  — RGBA colour (r, g, b, a as double 0.0–1.0)
+//    Rect   — Axis-aligned bounding box
+//
+//  All operations return new objects — vectors are immutable by convention.
+//
+//  Example:
+//    import "std.vector";
+//
+//    Vec3 a = vec3(1.0, 2.0, 3.0);
+//    Vec3 b = vec3(4.0, 5.0, 6.0);
+//    Vec3 c = a.add(b);          // (5, 7, 9)
+//    double d = a.dot(b);        // 32.0
+//    Vec3 n = a.cross(b);        // (-3, 6, -3)
+//    Vec3 u = a.normalized();    // unit vector
+// ============================================================================
+
+import "std.math";
+
+import "std.string";
+
+// ── Vec2 ──────────────────────────────────────────────────────────────────────
+
+class Vec2 {
+    public double x;
+    public double y;
+
+    public fun void init(double x, double y) {
+        this.x = x; this.y = y;
+    }
+
+    public fun Vec2 add(Vec2 v)  { return vec2(this.x + v.x, this.y + v.y); }
+    public fun Vec2 sub(Vec2 v)  { return vec2(this.x - v.x, this.y - v.y); }
+    public fun Vec2 scale(double s) { return vec2(this.x * s, this.y * s); }
+    public fun Vec2 neg()        { return vec2(0.0 - this.x, 0.0 - this.y); }
+
+    public fun double dot(Vec2 v)    { return this.x * v.x + this.y * v.y; }
+    public fun double cross(Vec2 v)  { return this.x * v.y - this.y * v.x; }  // z-component of 3D cross
+    public fun double lengthSq()     { return this.x * this.x + this.y * this.y; }
+    public fun double length()       { return sqrt(this.lengthSq()); }
+
+    public fun Vec2 normalized() {
+        double len = this.length();
+        if (len == 0.0) { return vec2(0.0, 0.0); }
+        return this.scale(1.0 / len);
+    }
+
+    public fun Vec2 lerp(Vec2 v, double t) {
+        return vec2(this.x + (v.x - this.x) * t,
+                    this.y + (v.y - this.y) * t);
+    }
+
+    public fun double distanceTo(Vec2 v)   { return this.sub(v).length(); }
+    public fun double distanceSqTo(Vec2 v) { return this.sub(v).lengthSq(); }
+
+    public fun Vec2 perpendicular()  { return vec2(0.0 - this.y, this.x); }
+
+    public fun double angle()  { return atan2(this.y, this.x); }  // radians from +X axis
+
+    public fun Vec2 rotated(double radians) {
+        double c = cos(radians); double s = sin(radians);
+        return vec2(this.x * c - this.y * s, this.x * s + this.y * c);
+    }
+
+    public fun Vec2 abs()  { return vec2(abs(this.x), abs(this.y)); }
+    public fun Vec2 floor(){ return vec2(floor(this.x), floor(this.y)); }
+    public fun Vec2 ceil() { return vec2(ceil(this.x), ceil(this.y)); }
+    public fun Vec2 round(){ return vec2(round(this.x), round(this.y)); }
+
+    public fun bool equals(Vec2 v) { return this.x == v.x && this.y == v.y; }
+    public fun Vec2 clone() { return vec2(this.x, this.y); }
+
+    public fun string toString() {
+        return "Vec2(" + doubleToString(this.x) + ", " + doubleToString(this.y) + ")";
+    }
+}
+
+// Constructor shorthand
+fun Vec2 vec2(double x, double y) {
+    Vec2 v = new Vec2(); v.init(x, y); return v;
+}
+
+fun Vec2 vec2Zero()   { return vec2(0.0, 0.0); }
+fun Vec2 vec2One()    { return vec2(1.0, 1.0); }
+fun Vec2 vec2Right()  { return vec2(1.0, 0.0); }
+fun Vec2 vec2Up()     { return vec2(0.0, 1.0); }
+
+// ── Vec3 ──────────────────────────────────────────────────────────────────────
+
+class Vec3 {
+    public double x;
+    public double y;
+    public double z;
+
+    public fun void init(double x, double y, double z) {
+        this.x = x; this.y = y; this.z = z;
+    }
+
+    public fun Vec3 add(Vec3 v)  { return vec3(this.x+v.x, this.y+v.y, this.z+v.z); }
+    public fun Vec3 sub(Vec3 v)  { return vec3(this.x-v.x, this.y-v.y, this.z-v.z); }
+    public fun Vec3 scale(double s){ return vec3(this.x*s, this.y*s, this.z*s); }
+    public fun Vec3 neg()        { return vec3(0.0-this.x, 0.0-this.y, 0.0-this.z); }
+
+    public fun double dot(Vec3 v) {
+        return this.x*v.x + this.y*v.y + this.z*v.z;
+    }
+
+    public fun Vec3 cross(Vec3 v) {
+        return vec3(
+            this.y * v.z - this.z * v.y,
+            this.z * v.x - this.x * v.z,
+            this.x * v.y - this.y * v.x
+        );
+    }
+
+    public fun double lengthSq() {
+        return this.x*this.x + this.y*this.y + this.z*this.z;
+    }
+    public fun double length()   { return sqrt(this.lengthSq()); }
+
+    public fun Vec3 normalized() {
+        double len = this.length();
+        if (len == 0.0) { return vec3(0.0, 0.0, 0.0); }
+        return this.scale(1.0 / len);
+    }
+
+    public fun Vec3 lerp(Vec3 v, double t) {
+        return vec3(this.x + (v.x-this.x)*t,
+                    this.y + (v.y-this.y)*t,
+                    this.z + (v.z-this.z)*t);
+    }
+
+    public fun double distanceTo(Vec3 v)   { return this.sub(v).length(); }
+    public fun double distanceSqTo(Vec3 v) { return this.sub(v).lengthSq(); }
+
+    public fun double angleTo(Vec3 v) {
+        double d = this.dot(v);
+        double l = this.length() * v.length();
+        if (l == 0.0) { return 0.0; }
+        return acos(clamp(d/l, -1.0, 1.0));
+    }
+
+    public fun Vec3 reflect(Vec3 normal) {
+        double d = 2.0 * this.dot(normal);
+        return this.sub(normal.scale(d));
+    }
+
+    public fun Vec3 project(Vec3 onto) {
+        double d = this.dot(onto) / onto.lengthSq();
+        return onto.scale(d);
+    }
+
+    public fun Vec3 abs()  { return vec3(abs(this.x), abs(this.y), abs(this.z)); }
+    public fun Vec3 floor(){ return vec3(floor(this.x), floor(this.y), floor(this.z)); }
+    public fun Vec3 ceil() { return vec3(ceil(this.x), ceil(this.y), ceil(this.z)); }
+    public fun Vec3 round(){ return vec3(round(this.x), round(this.y), round(this.z)); }
+
+    public fun Vec2 xy()   { return vec2(this.x, this.y); }
+    public fun Vec2 xz()   { return vec2(this.x, this.z); }
+
+    public fun bool equals(Vec3 v) { return this.x==v.x && this.y==v.y && this.z==v.z; }
+    public fun Vec3 clone() { return vec3(this.x, this.y, this.z); }
+
+    public fun string toString() {
+        return "Vec3(" + doubleToString(this.x) + ", " +
+               doubleToString(this.y) + ", " + doubleToString(this.z) + ")";
+    }
+}
+
+fun Vec3 vec3(double x, double y, double z) {
+    Vec3 v = new Vec3(); v.init(x, y, z); return v;
+}
+
+fun Vec3 vec3Zero()     { return vec3(0.0, 0.0, 0.0); }
+fun Vec3 vec3One()      { return vec3(1.0, 1.0, 1.0); }
+fun Vec3 vec3Right()    { return vec3(1.0, 0.0, 0.0); }
+fun Vec3 vec3Up()       { return vec3(0.0, 1.0, 0.0); }
+fun Vec3 vec3Forward()  { return vec3(0.0, 0.0, -1.0); }  // -Z convention
+
+// ── Vec4 ──────────────────────────────────────────────────────────────────────
+
+class Vec4 {
+    public double x;
+    public double y;
+    public double z;
+    public double w;
+
+    public fun void init(double x, double y, double z, double w) {
+        this.x = x; this.y = y; this.z = z; this.w = w;
+    }
+
+    public fun Vec4 add(Vec4 v)  {
+        return vec4(this.x+v.x, this.y+v.y, this.z+v.z, this.w+v.w);
+    }
+    public fun Vec4 sub(Vec4 v)  {
+        return vec4(this.x-v.x, this.y-v.y, this.z-v.z, this.w-v.w);
+    }
+    public fun Vec4 scale(double s) {
+        return vec4(this.x*s, this.y*s, this.z*s, this.w*s);
+    }
+    public fun double dot(Vec4 v) {
+        return this.x*v.x + this.y*v.y + this.z*v.z + this.w*v.w;
+    }
+    public fun double lengthSq() {
+        return this.x*this.x + this.y*this.y + this.z*this.z + this.w*this.w;
+    }
+    public fun double length() { return sqrt(this.lengthSq()); }
+    public fun Vec4 normalized() {
+        double len = this.length();
+        if (len == 0.0) { return vec4(0.0,0.0,0.0,0.0); }
+        return this.scale(1.0/len);
+    }
+    public fun Vec4 lerp(Vec4 v, double t) {
+        return vec4(this.x+(v.x-this.x)*t, this.y+(v.y-this.y)*t,
+                    this.z+(v.z-this.z)*t, this.w+(v.w-this.w)*t);
+    }
+
+    // Quaternion multiplication (for Vec4 used as a quaternion).
+    public fun Vec4 qmul(Vec4 q) {
+        return vec4(
+            this.w*q.x + this.x*q.w + this.y*q.z - this.z*q.y,
+            this.w*q.y - this.x*q.z + this.y*q.w + this.z*q.x,
+            this.w*q.z + this.x*q.y - this.y*q.x + this.z*q.w,
+            this.w*q.w - this.x*q.x - this.y*q.y - this.z*q.z
+        );
+    }
+
+    // Conjugate of this quaternion.
+    public fun Vec4 qconj() {
+        return vec4(0.0-this.x, 0.0-this.y, 0.0-this.z, this.w);
+    }
+
+    public fun Vec3 xyz() { return vec3(this.x, this.y, this.z); }
+    public fun Vec2 xy()  { return vec2(this.x, this.y); }
+    public fun bool equals(Vec4 v) {
+        return this.x==v.x && this.y==v.y && this.z==v.z && this.w==v.w;
+    }
+    public fun Vec4 clone() { return vec4(this.x, this.y, this.z, this.w); }
+
+    public fun string toString() {
+        return "Vec4(" + doubleToString(this.x) + ", " + doubleToString(this.y) +
+               ", " + doubleToString(this.z) + ", " + doubleToString(this.w) + ")";
+    }
+}
+
+fun Vec4 vec4(double x, double y, double z, double w) {
+    Vec4 v = new Vec4(); v.init(x, y, z, w); return v;
+}
+fun Vec4 vec4Zero() { return vec4(0.0, 0.0, 0.0, 0.0); }
+fun Vec4 vec4One()  { return vec4(1.0, 1.0, 1.0, 1.0); }
+
+// Quaternion identity: no rotation.
+fun Vec4 quatIdentity() { return vec4(0.0, 0.0, 0.0, 1.0); }
+
+// Quaternion from axis-angle.
+fun Vec4 quatFromAxisAngle(Vec3 axis, double radians) {
+    Vec3 a = axis.normalized();
+    double s = sin(radians * 0.5);
+    return vec4(a.x * s, a.y * s, a.z * s, cos(radians * 0.5));
+}
+
+// ── Mat3 ──────────────────────────────────────────────────────────────────────
+// 3×3 column-major matrix.  m[col][row] convention.
+// Stored as 9 doubles: col0_row0 … col2_row2.
+
+class Mat3 {
+    public double[] m;   // 9 elements, column-major
+
+    public fun void init() {
+        this.m = new double[9];
+        // Identity by default
+        this.m[0]=1.0; this.m[4]=1.0; this.m[8]=1.0;
+    }
+
+    public fun void initValues(double m00, double m01, double m02,
+                                double m10, double m11, double m12,
+                                double m20, double m21, double m22) {
+        this.m = new double[9];
+        // Column-major: col0=(m00,m01,m02), col1=(m10,m11,m12), col2=(m20,m21,m22)
+        this.m[0]=m00; this.m[1]=m01; this.m[2]=m02;
+        this.m[3]=m10; this.m[4]=m11; this.m[5]=m12;
+        this.m[6]=m20; this.m[7]=m21; this.m[8]=m22;
+    }
+
+    // Matrix × vector
+    public fun Vec3 mulVec(Vec3 v) {
+        return vec3(
+            this.m[0]*v.x + this.m[3]*v.y + this.m[6]*v.z,
+            this.m[1]*v.x + this.m[4]*v.y + this.m[7]*v.z,
+            this.m[2]*v.x + this.m[5]*v.y + this.m[8]*v.z
+        );
+    }
+
+    // Matrix × matrix
+    public fun Mat3 mul(Mat3 b) {
+        Mat3 r = new Mat3(); r.init();
+        int col = 0;
+        while (col < 3) {
+            int row = 0;
+            while (row < 3) {
+                double s = 0.0;
+                int k = 0;
+                while (k < 3) {
+                    s = s + this.m[k*3+row] * b.m[col*3+k];
+                    k = k + 1;
+                }
+                r.m[col*3+row] = s;
+                row = row + 1;
+            }
+            col = col + 1;
+        }
+        return r;
+    }
+
+    // Transpose
+    public fun Mat3 transposed() {
+        Mat3 r = new Mat3(); r.init();
+        r.m[0]=this.m[0]; r.m[1]=this.m[3]; r.m[2]=this.m[6];
+        r.m[3]=this.m[1]; r.m[4]=this.m[4]; r.m[5]=this.m[7];
+        r.m[6]=this.m[2]; r.m[7]=this.m[5]; r.m[8]=this.m[8];
+        return r;
+    }
+
+    // Determinant
+    public fun double det() {
+        return this.m[0]*(this.m[4]*this.m[8]-this.m[5]*this.m[7])
+             - this.m[3]*(this.m[1]*this.m[8]-this.m[2]*this.m[7])
+             + this.m[6]*(this.m[1]*this.m[5]-this.m[2]*this.m[4]);
+    }
+}
+
+fun Mat3 mat3Identity() { Mat3 m = new Mat3(); m.init(); return m; }
+
+// 2D rotation matrix (angle in radians).
+fun Mat3 mat3Rotation2D(double angle) {
+    double c = cos(angle); double s = sin(angle);
+    Mat3 m = new Mat3(); m.init();
+    m.m[0]=c; m.m[1]=s; m.m[3]=0.0-s; m.m[4]=c;
+    return m;
+}
+
+// ── Mat4 ──────────────────────────────────────────────────────────────────────
+// 4×4 column-major matrix for 3D transforms.
+
+class Mat4 {
+    public double[] m;   // 16 elements, column-major
+
+    public fun void init() {
+        this.m = new double[16];
+        this.m[0]=1.0; this.m[5]=1.0; this.m[10]=1.0; this.m[15]=1.0;
+    }
+
+    // Matrix × Vec4
+    public fun Vec4 mulVec(Vec4 v) {
+        return vec4(
+            this.m[0]*v.x + this.m[4]*v.y + this.m[8]*v.z  + this.m[12]*v.w,
+            this.m[1]*v.x + this.m[5]*v.y + this.m[9]*v.z  + this.m[13]*v.w,
+            this.m[2]*v.x + this.m[6]*v.y + this.m[10]*v.z + this.m[14]*v.w,
+            this.m[3]*v.x + this.m[7]*v.y + this.m[11]*v.z + this.m[15]*v.w
+        );
+    }
+
+    // Transform a Vec3 as a point (w=1).
+    public fun Vec3 mulPoint(Vec3 v) {
+        return this.mulVec(vec4(v.x, v.y, v.z, 1.0)).xyz();
+    }
+
+    // Transform a Vec3 as a direction (w=0).
+    public fun Vec3 mulDir(Vec3 v) {
+        return this.mulVec(vec4(v.x, v.y, v.z, 0.0)).xyz();
+    }
+
+    // Matrix × matrix
+    public fun Mat4 mul(Mat4 b) {
+        Mat4 r = new Mat4(); r.init();
+        int col = 0;
+        while (col < 4) {
+            int row = 0;
+            while (row < 4) {
+                double s = 0.0;
+                int k = 0;
+                while (k < 4) {
+                    s = s + this.m[k*4+row] * b.m[col*4+k];
+                    k = k + 1;
+                }
+                r.m[col*4+row] = s;
+                row = row + 1;
+            }
+            col = col + 1;
+        }
+        return r;
+    }
+
+    // Transpose
+    public fun Mat4 transposed() {
+        Mat4 r = new Mat4(); r.init();
+        int col = 0;
+        while (col < 4) {
+            int row = 0;
+            while (row < 4) {
+                r.m[row*4+col] = this.m[col*4+row];
+                row = row + 1;
+            }
+            col = col + 1;
+        }
+        return r;
+    }
+}
+
+fun Mat4 mat4Identity() { Mat4 m = new Mat4(); m.init(); return m; }
+
+// Translation matrix
+fun Mat4 mat4Translate(double tx, double ty, double tz) {
+    Mat4 m = mat4Identity();
+    m.m[12] = tx; m.m[13] = ty; m.m[14] = tz;
+    return m;
+}
+
+// Scale matrix
+fun Mat4 mat4Scale(double sx, double sy, double sz) {
+    Mat4 m = mat4Identity();
+    m.m[0] = sx; m.m[5] = sy; m.m[10] = sz;
+    return m;
+}
+
+// Rotation around X axis
+fun Mat4 mat4RotateX(double angle) {
+    Mat4 m = mat4Identity();
+    double c = cos(angle); double s = sin(angle);
+    m.m[5]=c; m.m[6]=s; m.m[9]=0.0-s; m.m[10]=c;
+    return m;
+}
+
+// Rotation around Y axis
+fun Mat4 mat4RotateY(double angle) {
+    Mat4 m = mat4Identity();
+    double c = cos(angle); double s = sin(angle);
+    m.m[0]=c; m.m[2]=0.0-s; m.m[8]=s; m.m[10]=c;
+    return m;
+}
+
+// Rotation around Z axis
+fun Mat4 mat4RotateZ(double angle) {
+    Mat4 m = mat4Identity();
+    double c = cos(angle); double s = sin(angle);
+    m.m[0]=c; m.m[1]=s; m.m[4]=0.0-s; m.m[5]=c;
+    return m;
+}
+
+// Perspective projection (right-handed, NDC: -1 to 1 depth)
+fun Mat4 mat4Perspective(double fovY, double aspect, double near, double far) {
+    double tanHalf = tan(fovY * 0.5);
+    Mat4 m = new Mat4(); m.init();
+    int i = 0; while (i < 16) { m.m[i] = 0.0; i = i + 1; }
+    m.m[0]  = 1.0 / (aspect * tanHalf);
+    m.m[5]  = 1.0 / tanHalf;
+    m.m[10] = 0.0 - (far + near) / (far - near);
+    m.m[11] = -1.0;
+    m.m[14] = 0.0 - (2.0 * far * near) / (far - near);
+    return m;
+}
+
+// Orthographic projection
+fun Mat4 mat4Ortho(double left, double right, double bottom, double top, double near, double far) {
+    Mat4 m = mat4Identity();
+    m.m[0]  = 2.0 / (right - left);
+    m.m[5]  = 2.0 / (top - bottom);
+    m.m[10] = 0.0 - 2.0 / (far - near);
+    m.m[12] = 0.0 - (right+left) / (right-left);
+    m.m[13] = 0.0 - (top+bottom) / (top-bottom);
+    m.m[14] = 0.0 - (far+near)   / (far-near);
+    return m;
+}
+
+// Look-at view matrix
+fun Mat4 mat4LookAt(Vec3 eye, Vec3 target, Vec3 up) {
+    Vec3 f = target.sub(eye).normalized();
+    Vec3 r = f.cross(up).normalized();
+    Vec3 u = r.cross(f);
+    Mat4 m = mat4Identity();
+    m.m[0]=r.x; m.m[4]=r.y; m.m[8]=r.z;
+    m.m[1]=u.x; m.m[5]=u.y; m.m[9]=u.z;
+    m.m[2]=0.0-f.x; m.m[6]=0.0-f.y; m.m[10]=0.0-f.z;
+    m.m[12]=0.0-r.dot(eye); m.m[13]=0.0-u.dot(eye); m.m[14]=f.dot(eye);
+    return m;
+}
+
+// ── Color ─────────────────────────────────────────────────────────────────────
+
+class Color {
+    public double r;
+    public double g;
+    public double b;
+    public double a;
+
+    public fun void init(double r, double g, double b, double a) {
+        this.r = clamp(r, 0.0, 1.0);
+        this.g = clamp(g, 0.0, 1.0);
+        this.b = clamp(b, 0.0, 1.0);
+        this.a = clamp(a, 0.0, 1.0);
+    }
+
+    public fun Color add(Color c) { return color(this.r+c.r, this.g+c.g, this.b+c.b, this.a); }
+    public fun Color mul(double t) { return color(this.r*t, this.g*t, this.b*t, this.a); }
+    public fun Color lerp(Color c, double t) {
+        return color(this.r+(c.r-this.r)*t, this.g+(c.g-this.g)*t,
+                     this.b+(c.b-this.b)*t, this.a+(c.a-this.a)*t);
+    }
+    public fun Color withAlpha(double a) { return color(this.r, this.g, this.b, a); }
+
+    // Convert to 0–255 integer components.
+    public fun int ri() { return (this.r * 255.0) as int; }
+    public fun int gi() { return (this.g * 255.0) as int; }
+    public fun int bi() { return (this.b * 255.0) as int; }
+    public fun int ai() { return (this.a * 255.0) as int; }
+
+    // Pack to 32-bit RGBA integer.
+    public fun int toRGBA32() {
+        return (this.ri() << 24) | (this.gi() << 16) | (this.bi() << 8) | this.ai();
+    }
+
+    public fun string toHex() {
+        // Build #RRGGBB string manually
+        string hex = "0123456789ABCDEF";
+        int ri = this.ri(); int gi = this.gi(); int bi = this.bi();
+        string s = "#";
+        s = s + charToString(hex[(ri >> 4) & 0xF]) + charToString(hex[ri & 0xF]);
+        s = s + charToString(hex[(gi >> 4) & 0xF]) + charToString(hex[gi & 0xF]);
+        s = s + charToString(hex[(bi >> 4) & 0xF]) + charToString(hex[bi & 0xF]);
+        return s;
+    }
+
+    public fun string toString() {
+        return "Color(" + doubleToString(this.r) + ", " + doubleToString(this.g) +
+               ", " + doubleToString(this.b) + ", " + doubleToString(this.a) + ")";
+    }
+}
+
+fun Color color(double r, double g, double b, double a) {
+    Color c = new Color(); c.init(r, g, b, a); return c;
+}
+fun Color colorRGB(double r, double g, double b) { return color(r, g, b, 1.0); }
+
+// Common colour constants
+fun Color colorBlack()   { return colorRGB(0.0, 0.0, 0.0); }
+fun Color colorWhite()   { return colorRGB(1.0, 1.0, 1.0); }
+fun Color colorRed()     { return colorRGB(1.0, 0.0, 0.0); }
+fun Color colorGreen()   { return colorRGB(0.0, 1.0, 0.0); }
+fun Color colorBlue()    { return colorRGB(0.0, 0.0, 1.0); }
+fun Color colorYellow()  { return colorRGB(1.0, 1.0, 0.0); }
+fun Color colorCyan()    { return colorRGB(0.0, 1.0, 1.0); }
+fun Color colorMagenta() { return colorRGB(1.0, 0.0, 1.0); }
+fun Color colorTransparent() { return color(0.0, 0.0, 0.0, 0.0); }
+
+// From 0–255 byte components.
+fun Color colorFromBytes(int r, int g, int b, int a) {
+    return color(r / 255.0, g / 255.0, b / 255.0, a / 255.0);
+}
+
+// ── Rect ──────────────────────────────────────────────────────────────────────
+
+class Rect {
+    public double x;
+    public double y;
+    public double width;
+    public double height;
+
+    public fun void init(double x, double y, double w, double h) {
+        this.x = x; this.y = y; this.width = w; this.height = h;
+    }
+
+    public fun double left()   { return this.x; }
+    public fun double right()  { return this.x + this.width; }
+    public fun double top()    { return this.y; }
+    public fun double bottom() { return this.y + this.height; }
+    public fun Vec2 center()   { return vec2(this.x + this.width*0.5, this.y + this.height*0.5); }
+    public fun Vec2 topLeft()  { return vec2(this.x, this.y); }
+    public fun Vec2 topRight() { return vec2(this.right(), this.y); }
+    public fun Vec2 bottomLeft()  { return vec2(this.x, this.bottom()); }
+    public fun Vec2 bottomRight() { return vec2(this.right(), this.bottom()); }
+
+    public fun double area()   { return this.width * this.height; }
+    public fun bool isEmpty()  { return this.width <= 0.0 || this.height <= 0.0; }
+
+    public fun bool contains(Vec2 p) {
+        return p.x >= this.x && p.x < this.right() &&
+               p.y >= this.y && p.y < this.bottom();
+    }
+
+    public fun bool containsRect(Rect r) {
+        return r.left() >= this.left() && r.right() <= this.right() &&
+               r.top() >= this.top() && r.bottom() <= this.bottom();
+    }
+
+    public fun bool intersects(Rect r) {
+        return this.left() < r.right() && this.right() > r.left() &&
+               this.top() < r.bottom() && this.bottom() > r.top();
+    }
+
+    public fun Rect intersection(Rect r) {
+        double lx = max(this.left(), r.left());
+        double ly = max(this.top(), r.top());
+        double rx = min(this.right(), r.right());
+        double ry = min(this.bottom(), r.bottom());
+        if (rx < lx || ry < ly) { return rect(0.0, 0.0, 0.0, 0.0); }
+        return rect(lx, ly, rx-lx, ry-ly);
+    }
+
+    public fun Rect union(Rect r) {
+        double lx = min(this.left(), r.left());
+        double ly = min(this.top(), r.top());
+        double rx = max(this.right(), r.right());
+        double ry = max(this.bottom(), r.bottom());
+        return rect(lx, ly, rx-lx, ry-ly);
+    }
+
+    public fun Rect expand(double amount) {
+        return rect(this.x-amount, this.y-amount,
+                    this.width+amount*2.0, this.height+amount*2.0);
+    }
+
+    public fun Rect translate(Vec2 delta) {
+        return rect(this.x+delta.x, this.y+delta.y, this.width, this.height);
+    }
+
+    public fun string toString() {
+        return "Rect(" + doubleToString(this.x) + ", " + doubleToString(this.y) +
+               ", " + doubleToString(this.width) + "x" + doubleToString(this.height) + ")";
+    }
+}
+
+fun Rect rect(double x, double y, double w, double h) {
+    Rect r = new Rect(); r.init(x, y, w, h); return r;
+}
+
+fun Rect rectFromPoints(Vec2 a, Vec2 b) {
+    double lx = min(a.x, b.x); double ly = min(a.y, b.y);
+    double rx = max(a.x, b.x); double ry = max(a.y, b.y);
+    return rect(lx, ly, rx-lx, ry-ly);
+}
+
+fun Rect rectCentered(Vec2 center, double w, double h) {
+    return rect(center.x - w*0.5, center.y - h*0.5, w, h);
+}

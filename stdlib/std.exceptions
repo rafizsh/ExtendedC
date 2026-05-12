@@ -1,0 +1,408 @@
+// ============================================================================
+//  std.exceptions  --  Typed exception hierarchy and structured error handling
+//  Import with:  import "std.exceptions";
+//
+//  Exception hierarchy:
+//
+//    AppException          — base for all application exceptions
+//      IOException         — file/network/stream errors
+//        FileNotFoundException
+//        PermissionException
+//      ValueError          — bad data or argument values
+//        ParseException    — string-to-type conversion failure
+//        RangeException    — value outside allowed bounds
+//        NullException     — unexpected null value
+//      StateException      — invalid object/program state
+//      AuthException       — authentication or authorisation failure
+//      TimeoutException    — operation took too long
+//      NotImplementedException
+//      CancelException     — operation was cancelled
+//
+//  All exceptions carry:
+//    message   — human-readable description
+//    code      — machine-readable string code  (e.g. "FILE_NOT_FOUND")
+//    context   — optional Map of extra key/value details
+//
+//  Throwing:
+//    throw exceptionMessage(new IOException("disk full"));
+//
+//  Catching (EC catch receives the formatted string):
+//    try { ... }
+//    catch (Exception e) {
+//        if (isIOError(e))    { ... }
+//        if (isValueError(e)) { ... }
+//    }
+//
+//  Because EC's throw/catch uses strings, exceptions are serialised to a
+//  tagged string format:  "[CODE] message {key:val, key:val}"
+//  Helper functions parse that format back to structured data.
+// ============================================================================
+
+import "std.io";
+import "std.string";
+import "std.collections";
+import "std.errors";
+
+// ── Exception base ────────────────────────────────────────────────────────────
+
+class AppException {
+    public string message;
+    public string code;
+    public Map    context;   // extra key-value details
+
+    public fun void init() {
+        this.message = "";
+        this.code    = "";
+        this.context = new Map();
+    }
+
+    public fun void setup(string message, string code) {
+        this.message = message;
+        this.code    = code;
+    }
+
+    // Add context detail — chainable.
+    public fun AppException addContext(string key, string value) {
+        this.context.set(key, value);
+        return this;
+    }
+
+    // Format to the tagged string used by throw.
+    public fun string format() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("["); sb.append(this.code); sb.append("] ");
+        sb.append(this.message);
+        if (!this.context.isEmpty()) {
+            sb.append(" {");
+            List keys = this.context.keys();
+            int i = 0;
+            while (i < keys.length()) {
+                if (i > 0) { sb.append(", "); }
+                string k = keys.get(i) as string;
+                string v = this.context.get(k) as string;
+                sb.append(k); sb.append(":"); sb.append(v);
+                i = i + 1;
+            }
+            sb.append("}");
+        }
+        return sb.toString();
+    }
+
+    // Throw this exception.
+    public fun void raise() throws {
+        throw this.format();
+    }
+}
+
+// ── IOException hierarchy ─────────────────────────────────────────────────────
+
+class IOException extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string message) {
+        super.setup(message, "IO_ERROR");
+    }
+}
+
+class FileNotFoundException extends IOException {
+    public string path;
+    public fun void init() { super.init(); }
+    public fun void setup(string path) {
+        super.setup("File not found: " + path);
+        this.code = "FILE_NOT_FOUND";
+        this.path = path;
+        this.context.set("path", path);
+    }
+}
+
+class PermissionException extends IOException {
+    public fun void init() { super.init(); }
+    public fun void setup(string resource) {
+        super.setup("Permission denied: " + resource);
+        this.code = "PERMISSION_DENIED";
+        this.context.set("resource", resource);
+    }
+}
+
+class NetworkException extends IOException {
+    public fun void init() { super.init(); }
+    public fun void setup(string url, string detail) {
+        super.setup("Network error accessing " + url + ": " + detail);
+        this.code = "NETWORK_ERROR";
+        this.context.set("url", url);
+        this.context.set("detail", detail);
+    }
+}
+
+// ── ValueError hierarchy ──────────────────────────────────────────────────────
+
+class ValueError extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string message) { super.setup(message, "VALUE_ERROR"); }
+}
+
+class ParseException extends ValueError {
+    public string input;
+    public string targetType;
+    public fun void init() { super.init(); this.input = ""; this.targetType = ""; }
+    public fun void setup(string input, string targetType) {
+        super.setup("Cannot parse \"" + input + "\" as " + targetType);
+        this.code = "PARSE_ERROR";
+        this.input = input; this.targetType = targetType;
+        this.context.set("input", input);
+        this.context.set("type", targetType);
+    }
+}
+
+class RangeException extends ValueError {
+    public fun void init() { super.init(); }
+    public fun void setup(string name, string value, string min, string max) {
+        super.setup(name + " = " + value + " is out of range [" + min + ", " + max + "]");
+        this.code = "OUT_OF_RANGE";
+        this.context.set("field", name); this.context.set("value", value);
+        this.context.set("min", min); this.context.set("max", max);
+    }
+}
+
+class NullException extends ValueError {
+    public fun void init() { super.init(); }
+    public fun void setup(string field) {
+        super.setup("Unexpected null value for: " + field);
+        this.code = "NULL_VALUE"; this.context.set("field", field);
+    }
+}
+
+class TypeException extends ValueError {
+    public fun void init() { super.init(); }
+    public fun void setup(string expected, string actual) {
+        super.setup("Expected " + expected + " but got " + actual);
+        this.code = "TYPE_MISMATCH";
+        this.context.set("expected", expected); this.context.set("actual", actual);
+    }
+}
+
+// ── StateException ────────────────────────────────────────────────────────────
+
+class StateException extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string message) { super.setup(message, "INVALID_STATE"); }
+}
+
+class NotInitialisedException extends StateException {
+    public fun void init() { super.init(); }
+    public fun void setup(string component) {
+        super.setup(component + " has not been initialised");
+        this.code = "NOT_INITIALISED"; this.context.set("component", component);
+    }
+}
+
+class AlreadyExistsException extends StateException {
+    public fun void init() { super.init(); }
+    public fun void setup(string resource) {
+        super.setup(resource + " already exists");
+        this.code = "ALREADY_EXISTS"; this.context.set("resource", resource);
+    }
+}
+
+// ── AuthException ─────────────────────────────────────────────────────────────
+
+class AuthException extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string message) { super.setup(message, "AUTH_ERROR"); }
+}
+
+class UnauthorisedException extends AuthException {
+    public fun void init() { super.init(); }
+    public fun void setup(string action) {
+        super.setup("Not authorised to: " + action);
+        this.code = "UNAUTHORISED"; this.context.set("action", action);
+    }
+}
+
+class UnauthenticatedException extends AuthException {
+    public fun void init() { super.init(); }
+    public fun void setup() {
+        super.setup("Authentication required");
+        this.code = "UNAUTHENTICATED";
+    }
+}
+
+// ── TimeoutException ──────────────────────────────────────────────────────────
+
+class TimeoutException extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string operation, int limitMs) {
+        super.setup("Operation timed out after " + toString(limitMs) + "ms: " + operation, "TIMEOUT");
+        this.code = "TIMEOUT";
+        this.context.set("operation", operation);
+        this.context.set("limitMs", toString(limitMs));
+    }
+}
+
+// ── NotImplementedException ───────────────────────────────────────────────────
+
+class NotImplementedException extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string feature) {
+        super.setup("Not implemented: " + feature, "NOT_IMPLEMENTED");
+        this.code = "NOT_IMPLEMENTED"; this.context.set("feature", feature);
+    }
+}
+
+// ── CancelException ───────────────────────────────────────────────────────────
+
+class CancelException extends AppException {
+    public fun void init() { super.init(); }
+    public fun void setup(string reason) {
+        super.setup("Operation cancelled: " + reason, "CANCELLED");
+        this.code = "CANCELLED"; this.context.set("reason", reason);
+    }
+}
+
+// ── Throw helpers (shorthand) ─────────────────────────────────────────────────
+
+// Raise an IOException.
+fun void raiseIO(string message) throws {
+    IOException e = new IOException(); e.init(); e.setup(message);
+    e.raise();
+}
+
+// Raise a FileNotFoundException.
+fun void raiseFileNotFound(string path) throws {
+    FileNotFoundException e = new FileNotFoundException(); e.init(); e.setup(path);
+    e.raise();
+}
+
+// Raise a ValueError.
+fun void raiseValue(string message) throws {
+    ValueError e = new ValueError(); e.init(); e.setup(message);
+    e.raise();
+}
+
+// Raise a ParseException.
+fun void raiseParse(string input, string type) throws {
+    ParseException e = new ParseException(); e.init(); e.setup(input, type);
+    e.raise();
+}
+
+// Raise a RangeException.
+fun void raiseRange(string field, string value, string min, string max) throws {
+    RangeException e = new RangeException(); e.init(); e.setup(field, value, min, max);
+    e.raise();
+}
+
+// Raise a NullException.
+fun void raiseNull(string field) throws {
+    NullException e = new NullException(); e.init(); e.setup(field);
+    e.raise();
+}
+
+// Raise a StateException.
+fun void raiseState(string message) throws {
+    StateException e = new StateException(); e.init(); e.setup(message);
+    e.raise();
+}
+
+// Raise a TimeoutException.
+fun void raiseTimeout(string operation, int limitMs) throws {
+    TimeoutException e = new TimeoutException(); e.init(); e.setup(operation, limitMs);
+    e.raise();
+}
+
+// Raise a NotImplementedException.
+fun void raiseNotImpl(string feature) throws {
+    NotImplementedException e = new NotImplementedException(); e.init(); e.setup(feature);
+    e.raise();
+}
+
+// ── Exception string inspection ───────────────────────────────────────────────
+// EC's catch receives the string produced by AppException.format():
+//   "[CODE] message {key:val}"
+// These helpers inspect that string without needing to re-parse the object.
+
+// Extract the error code from a caught exception string.
+// Returns "" if not in tagged format.
+fun string exceptionCode(string e) {
+    if (stringLen(e) < 2 || e[0] != '[') { return ""; }
+    int end = indexOf(e, "]");
+    if (end < 0) { return ""; }
+    return substring(e, 1, end);
+}
+
+// Extract the human-readable message from a caught exception string.
+fun string exceptionMessage(string e) {
+    if (stringLen(e) < 2 || e[0] != '[') { return e; }
+    int end = indexOf(e, "]");
+    if (end < 0 || end + 2 >= stringLen(e)) { return e; }
+    string rest = substring(e, end + 2, stringLen(e));
+    int brace = indexOf(rest, " {");
+    if (brace >= 0) { return substring(rest, 0, brace); }
+    return rest;
+}
+
+// True if the caught exception string has the given code.
+fun bool hasCode(string e, string code) {
+    return exceptionCode(e) == code;
+}
+
+// Type-check helpers — test the error code prefix of caught strings.
+fun bool isIOError(string e)         { return hasCode(e, "IO_ERROR") || hasCode(e, "FILE_NOT_FOUND") || hasCode(e, "PERMISSION_DENIED") || hasCode(e, "NETWORK_ERROR"); }
+fun bool isValueError(string e)      { return hasCode(e, "VALUE_ERROR") || hasCode(e, "PARSE_ERROR") || hasCode(e, "OUT_OF_RANGE") || hasCode(e, "NULL_VALUE") || hasCode(e, "TYPE_MISMATCH"); }
+fun bool isStateError(string e)      { return hasCode(e, "INVALID_STATE") || hasCode(e, "NOT_INITIALISED") || hasCode(e, "ALREADY_EXISTS"); }
+fun bool isAuthError(string e)       { return hasCode(e, "AUTH_ERROR") || hasCode(e, "UNAUTHORISED") || hasCode(e, "UNAUTHENTICATED"); }
+fun bool isTimeout(string e)         { return hasCode(e, "TIMEOUT"); }
+fun bool isNotImplemented(string e)  { return hasCode(e, "NOT_IMPLEMENTED"); }
+fun bool isCancelled(string e)       { return hasCode(e, "CANCELLED"); }
+fun bool isFileNotFound(string e)    { return hasCode(e, "FILE_NOT_FOUND"); }
+fun bool isParseError(string e)      { return hasCode(e, "PARSE_ERROR"); }
+fun bool isRangeError(string e)      { return hasCode(e, "OUT_OF_RANGE"); }
+fun bool isNullError(string e)       { return hasCode(e, "NULL_VALUE"); }
+
+// ── Result integration ────────────────────────────────────────────────────────
+
+// Catch a typed exception and return it as an Err Result.
+// Wraps fn() — if it throws, returns Err with the exception string.
+fun Result attempt(var fn) {
+    try {
+        var v = fn(null);
+        return ok(v);
+    } catch (Exception e) {
+        return errCode(exceptionMessage(e), exceptionCode(e));
+    }
+}
+
+// Like attempt() but for void operations.
+fun Result attemptDo(var fn) {
+    try {
+        fn(null);
+        return ok(null);
+    } catch (Exception e) {
+        return errCode(exceptionMessage(e), exceptionCode(e));
+    }
+}
+
+// ── Exception guard (assert-style) ───────────────────────────────────────────
+
+// Throw a ValueError if condition is false.
+fun void require(bool condition, string message) throws {
+    if (!condition) {
+        ValueError e = new ValueError(); e.init(); e.setup(message);
+        e.raise();
+    }
+}
+
+// Throw a NullException if value is null.
+fun void requireNotNull(var value, string field) throws {
+    if (value == null) { raiseNull(field); }
+}
+
+// Throw a RangeException if value is outside [min, max].
+fun void requireRange(int value, int min, int max, string field) throws {
+    if (value < min || value > max) {
+        raiseRange(field, toString(value), toString(min), toString(max));
+    }
+}
+
+// Throw a StateException if condition is false.
+fun void requireState(bool condition, string message) throws {
+    if (!condition) { raiseState(message); }
+}

@@ -1,0 +1,261 @@
+// ============================================================================
+//  std.time  --  Date, time, and duration utilities
+//  Import with:  import "std.time";
+//
+//  Two clocks:
+//    timeMs()         — monotonic clock in ms (no relation to wall time)
+//    wallClockMs()    — wall-clock milliseconds since Unix epoch (UTC)
+//
+//  All calendar decomposition uses the epoch-ms returned by wallClockMs().
+//  UTC functions: timeYear/Month/Day/Hour/Minute/Second/Weekday/Yearday/Format
+//  Local functions: timeYearLocal/MonthLocal/DayLocal/HourLocal/MinuteLocal/SecondLocal/FormatLocal
+//
+//  Stopwatch class for timing code sections.
+//
+//  Example:
+//    import "std.time";
+//
+//    long now = wallClockMs();
+//    println(timeFormat(now, "%Y-%m-%d %H:%M:%S"));
+//
+//    Stopwatch sw = new Stopwatch();
+//    sw.init();
+//    sw.start();
+//    doWork();
+//    sw.stop();
+//    println("Elapsed: " + toString(sw.elapsedMs()) + " ms");
+// ============================================================================
+
+import "std.string";
+import "std.collections";
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+
+// Wall-clock milliseconds since Unix epoch (1970-01-01 00:00:00 UTC).
+fun long now() { return wallClockMs(); }
+
+// Monotonic milliseconds since program start (for elapsed time).
+fun long monotonicMs() { return timeMs(); }
+
+// ── UTC calendar decomposition ────────────────────────────────────────────────
+
+// Year (e.g. 2025) from a UTC epoch-ms value.
+fun int year(long ms)    { return timeYear(ms); }
+
+// Month 1–12.
+fun int month(long ms)   { return timeMonth(ms); }
+
+// Day of month 1–31.
+fun int day(long ms)     { return timeDay(ms); }
+
+// Hour 0–23.
+fun int hour(long ms)    { return timeHour(ms); }
+
+// Minute 0–59.
+fun int minute(long ms)  { return timeMinute(ms); }
+
+// Second 0–59.
+fun int second(long ms)  { return timeSecond(ms); }
+
+// Day of week: 0=Sunday, 1=Monday, … 6=Saturday.
+fun int weekday(long ms) { return timeWeekday(ms); }
+
+// Day of year: 0–365.
+fun int yearday(long ms) { return timeYearday(ms); }
+
+// Format a UTC epoch-ms using a strftime pattern.
+// Common patterns:
+//   "%Y-%m-%d"          → "2025-05-12"
+//   "%H:%M:%S"          → "14:30:00"
+//   "%Y-%m-%d %H:%M:%S" → "2025-05-12 14:30:00"
+//   "%A"                → "Monday"
+//   "%B"                → "May"
+//   "%I:%M %p"          → "02:30 PM"
+fun string format(long ms, string fmt) { return timeFormat(ms, fmt); }
+
+// ISO 8601 date string: "2025-05-12".
+fun string isoDate(long ms) { return timeFormat(ms, "%Y-%m-%d"); }
+
+// ISO 8601 time string: "14:30:00".
+fun string isoTime(long ms) { return timeFormat(ms, "%H:%M:%S"); }
+
+// ISO 8601 datetime string: "2025-05-12T14:30:00Z".
+fun string isoDateTime(long ms) { return timeFormat(ms, "%Y-%m-%dT%H:%M:%SZ"); }
+
+// Human-readable: "Mon, 12 May 2025 14:30:00".
+fun string rfc1123(long ms) { return timeFormat(ms, "%a, %d %b %Y %H:%M:%S"); }
+
+// ── Local calendar decomposition ──────────────────────────────────────────────
+
+fun int yearLocal(long ms)   { return timeYearLocal(ms); }
+fun int monthLocal(long ms)  { return timeMonthLocal(ms); }
+fun int dayLocal(long ms)    { return timeDayLocal(ms); }
+fun int hourLocal(long ms)   { return timeHourLocal(ms); }
+fun int minuteLocal(long ms) { return timeMinuteLocal(ms); }
+fun int secondLocal(long ms) { return timeSecondLocal(ms); }
+
+fun string formatLocal(long ms, string fmt) { return timeFormatLocal(ms, fmt); }
+fun string isoDateLocal(long ms)     { return timeFormatLocal(ms, "%Y-%m-%d"); }
+fun string isoTimeLocal(long ms)     { return timeFormatLocal(ms, "%H:%M:%S"); }
+fun string isoDateTimeLocal(long ms) { return timeFormatLocal(ms, "%Y-%m-%dT%H:%M:%S"); }
+
+// ── Duration helpers ──────────────────────────────────────────────────────────
+
+// Convert milliseconds to whole seconds.
+fun long msToSeconds(long ms) { return ms / 1000; }
+
+// Convert milliseconds to whole minutes.
+fun long msToMinutes(long ms) { return ms / 60000; }
+
+// Convert milliseconds to whole hours.
+fun long msToHours(long ms) { return ms / 3600000; }
+
+// Convert milliseconds to whole days.
+fun long msToDays(long ms) { return ms / 86400000; }
+
+// Convert seconds to milliseconds.
+fun long secondsToMs(long s) { return s * 1000; }
+
+// Convert minutes to milliseconds.
+fun long minutesToMs(long m) { return m * 60000; }
+
+// Convert hours to milliseconds.
+fun long hoursToMs(long h) { return h * 3600000; }
+
+// Convert days to milliseconds.
+fun long daysToMs(long d) { return d * 86400000; }
+
+// Human-readable duration string: "2h 30m 15s 200ms".
+fun string formatDuration(long ms) {
+    long h  = ms / 3600000; ms = ms % 3600000;
+    long m  = ms / 60000;   ms = ms % 60000;
+    long s  = ms / 1000;    ms = ms % 1000;
+    StringBuilder sb = new StringBuilder();
+    if (h > 0) { sb.appendLong(h); sb.append("h "); }
+    if (m > 0 || h > 0) { sb.appendLong(m); sb.append("m "); }
+    sb.appendLong(s); sb.append("s");
+    if (ms > 0) { sb.append(" "); sb.appendLong(ms); sb.append("ms"); }
+    return sb.toString();
+}
+
+// True if the given UTC epoch-ms falls on a weekend (Saturday or Sunday).
+fun bool isWeekend(long ms) {
+    int wd = weekday(ms);
+    return wd == 0 || wd == 6;
+}
+
+// True if year is a Gregorian leap year.
+fun bool isLeapYear(int y) {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+// Days in a given month (1–12) of a given year.
+fun int daysInMonth(int y, int m) {
+    if (m == 2) {
+        return isLeapYear(y) ? 29 : 28;
+    }
+    if (m == 4 || m == 6 || m == 9 || m == 11) { return 30; }
+    return 31;
+}
+
+// Difference in whole days between two UTC epoch-ms values.
+fun long daysBetween(long a, long b) {
+    long diff = a - b;
+    if (diff < 0) { diff = 0 - diff; }
+    return diff / 86400000;
+}
+
+// ── Stopwatch ─────────────────────────────────────────────────────────────────
+
+// Stopwatch for timing code sections.
+//
+//   Stopwatch sw = new Stopwatch();
+//   sw.init();
+//   sw.start();
+//   doWork();
+//   sw.stop();
+//   long ms = sw.elapsedMs();
+//   sw.reset();
+class Stopwatch {
+    private long startTime;
+    private long accumulated;
+    private bool running;
+
+    public fun void init() {
+        this.startTime   = 0;
+        this.accumulated = 0;
+        this.running     = false;
+    }
+
+    // Start (or resume) the stopwatch.
+    public fun void start() {
+        if (!this.running) {
+            this.startTime = timeMs();
+            this.running   = true;
+        }
+    }
+
+    // Stop (pause) the stopwatch.
+    public fun void stop() {
+        if (this.running) {
+            this.accumulated = this.accumulated + timeMs() - this.startTime;
+            this.running = false;
+        }
+    }
+
+    // Reset to zero (also stops if running).
+    public fun void reset() {
+        this.accumulated = 0;
+        this.running     = false;
+        this.startTime   = 0;
+    }
+
+    // Restart: reset and start immediately.
+    public fun void restart() {
+        this.accumulated = 0;
+        this.startTime   = timeMs();
+        this.running     = true;
+    }
+
+    // Elapsed milliseconds (includes current running interval if still running).
+    public fun long elapsedMs() {
+        long acc = this.accumulated;
+        if (this.running) { acc = acc + timeMs() - this.startTime; }
+        return acc;
+    }
+
+    // Elapsed seconds (truncated).
+    public fun long elapsedSeconds() { return this.elapsedMs() / 1000; }
+
+    // True if the stopwatch is currently running.
+    public fun bool isRunning() { return this.running; }
+
+    // Human-readable elapsed time string.
+    public fun string toString() {
+        return formatDuration(this.elapsedMs());
+    }
+
+    // Lap: record elapsed time and keep running.
+    // Returns elapsed ms at this moment.
+    public fun long lap() {
+        return this.elapsedMs();
+    }
+}
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+
+// Sleep for the remaining time in a frame budget.
+// Call at the start of each frame with the target frame duration in ms.
+// Useful for capping a loop to a fixed rate (e.g. 60 fps = 16 ms/frame).
+//
+//   long frame = now();
+//   while (running) {
+//       update();
+//       throttle(frame, 16);
+//       frame = now();
+//   }
+fun void throttle(long frameStart, int targetMs) {
+    long elapsed = timeMs() - frameStart;
+    long wait    = (targetMs as long) - elapsed;
+    if (wait > 0) { threadSleep(wait as int); }
+}
